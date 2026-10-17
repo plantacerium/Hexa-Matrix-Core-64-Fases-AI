@@ -21,6 +21,7 @@ import math
 import json
 import time
 import re
+import base64
 from datetime import datetime, timezone, timedelta
 import unicodedata
 from typing import Dict, List, Tuple, Optional, Any
@@ -37,11 +38,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import (
     Qt, QDate, QTime, QDateTime, QTimer, QThread, Signal, Slot,
-    QPropertyAnimation, QEasingCurve, Property, QRectF, QPointF
+    QPropertyAnimation, QEasingCurve, Property, QRectF, QPointF, QBuffer, QIODevice
 )
 from PySide6.QtGui import (
     QFont, QColor, QPalette, QIcon, QPainter, QPen, QBrush,
-    QRadialGradient, QLinearGradient, QConicalGradient, QPainterPath, QPolygonF
+    QRadialGradient, QLinearGradient, QConicalGradient, QPainterPath, QPolygonF,
+    QTextCursor, QPixmap
 )
 
 # Integración con Ollama
@@ -50,6 +52,19 @@ try:
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
+
+# Integración con ReportLab para Dossiers Ejecutivos PDF
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, PageBreak
+    )
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -129,7 +144,7 @@ CORE64_CATALOG = {
     11: {"entropia": "Oscuridad", "coherencia": "Idealismo", "resonancia": "Luz", "bits": "111000", "pair": 12, "ring": "cluster_treonina", "firmware": "Transmite arquetipos e imágenes visionarias para nutrir la psique sin caer en la ilusión estéril."},
     12: {"entropia": "Vanidad", "coherencia": "Discriminación", "resonancia": "Pureza", "bits": "000111", "pair": 11, "ring": "cluster_leucina", "firmware": "Calibra la pureza del tono y el momento oportuno de expresión somática y verbal con alta precisión."},
     13: {"entropia": "Discordia", "coherencia": "Discernimiento", "resonancia": "Empatía", "bits": "101111", "pair": 7, "ring": "cluster_valina", "firmware": "Escucha atenta de las historias de fondo; separa el ruido reactivo de la sabiduría esencial colectiva."},
-    14: {"entropia": "Compromiso", "coherencia": "Competencia", "resonancia": "Abundancia", "bits": "101111", "pair": 8, "ring": "cluster_stop", "firmware": "Moviliza energía fértil e instrumental hacia artefactos que multiplican la riqueza de recursos."},
+    14: {"entropia": "Compromiso", "coherencia": "Competencia", "resonancia": "Abundancia", "bits": "111101", "pair": 8, "ring": "cluster_stop", "firmware": "Moviliza energía fértil e instrumental hacia artefactos que multiplican la riqueza de recursos."},
     15: {"entropia": "Monotonía", "coherencia": "Magnetismo", "resonancia": "Florescencia", "bits": "001000", "pair": 10, "ring": "cluster_serina", "firmware": "Integra todos los ritmos humanos y biológicos emitiendo una atracción serena sin exclusiones."},
     16: {"entropia": "Indiferencia", "coherencia": "Versatilidad", "resonancia": "Maestría", "bits": "000100", "pair": 9, "ring": "cluster_asparagina", "firmware": "Domina herramientas técnicas y artísticas aplicando versatilidad entusiasta hasta la maestría."},
     17: {"entropia": "Opinión", "coherencia": "Visión Lejana", "resonancia": "Omnisciencia", "bits": "100110", "pair": 18, "ring": "cluster_arginina", "firmware": "Estructura esquemas lógicos multidimensionales previniendo el sesgo dogmático de polarización."},
@@ -151,7 +166,7 @@ CORE64_CATALOG = {
     33: {"entropia": "Olvido", "coherencia": "Atención Plena", "resonancia": "Revelación", "bits": "001111", "pair": 19, "ring": "cluster_histidina", "firmware": "Se retira al santuario interno para procesar memorias y convertirlas en sabiduría sedimentada."},
     34: {"entropia": "Fuerza Bruta", "coherencia": "Fuerza Sagrada", "resonancia": "Majestad", "bits": "111100", "pair": 20, "ring": "cluster_lisina", "firmware": "Canaliza potencia muscular y metabólica de forma armónica al servicio del bien común operativo."},
     35: {"entropia": "Hambre", "coherencia": "Aventura", "resonancia": "Ilimitación", "bits": "000101", "pair": 5, "ring": "cluster_prolina", "firmware": "Cruza fronteras experienciales con audacia sin caer en el aburrimiento crónico insaciable."},
-    36: {"entropia": "Turbulencia", "coherencia": "Humanidad", "resonancia": "Compasión", "bits": "101010", "pair": 6, "ring": "cluster_triptofano", "firmware": "Atraviesa crisis emocionales agudas extrayendo compasión visceral por la condición vulnerable."},
+    36: {"entropia": "Turbulencia", "coherencia": "Humanidad", "resonancia": "Compasión", "bits": "101000", "pair": 6, "ring": "cluster_triptofano", "firmware": "Atraviesa crisis emocionales agudas extrayendo compasión visceral por la condición vulnerable."},
     37: {"entropia": "Debilidad", "coherencia": "Igualdad", "resonancia": "Ternura", "bits": "101011", "pair": 40, "ring": "cluster_glicina", "firmware": "Crea pactos de apoyo mutuo y lealtad familiar basados en respeto simétrico de las diferencias."},
     38: {"entropia": "Lucha", "coherencia": "Perseverancia", "resonancia": "Honor", "bits": "110101", "pair": 39, "ring": "cluster_arginina", "firmware": "Pelea por causas nobles con tenacidad indomable sin desgastarse en combates estériles."},
     39: {"entropia": "Provocación", "coherencia": "Dinamismo", "resonancia": "Liberación", "bits": "001010", "pair": 38, "ring": "cluster_serina", "firmware": "Detona atascos energéticos ajenos mediante estímulos precisos para devolver movilidad al flujo."},
@@ -163,7 +178,7 @@ CORE64_CATALOG = {
     45: {"entropia": "Dominancia", "coherencia": "Sinergia", "resonancia": "Comunión", "bits": "000110", "pair": 26, "ring": "cluster_asparagina", "firmware": "Reúne a la tribu en torno a recursos compartidos gestionando la custodia común con generosidad."},
     46: {"entropia": "Seriedad", "coherencia": "Deleite", "resonancia": "Éxtasis", "bits": "011000", "pair": 25, "ring": "cluster_alanina_a", "firmware": "Honra el cuerpo físico en la materia con gozo sensual y ligereza descartando pesadumbre solemne."},
     47: {"entropia": "Opresión", "coherencia": "Transmutación", "resonancia": "Transfiguración", "bits": "010110", "pair": 22, "ring": "cluster_glicina", "firmware": "Transmuta cargas ancestrales y angustia mental densa en combustible creativo luminoso."},
-    48: {"entropia": "Inadecuación", "coherencia": "Recursos", "resonancia": "Sabiduría", "bits": "010101", "pair": 21, "ring": "cluster_alanina_a", "firmware": "Bucea en la profundidad del pozo somático trayendo soluciones prácticas con ingenio natural."},
+    48: {"entropia": "Inadecuación", "coherencia": "Recursos", "resonancia": "Sabiduría", "bits": "011010", "pair": 21, "ring": "cluster_alanina_a", "firmware": "Bucea en la profundidad del pozo somático trayendo soluciones prácticas con ingenio natural."},
     49: {"entropia": "Reacción", "coherencia": "Revolución", "resonancia": "Renacimiento", "bits": "101110", "pair": 4, "ring": "cluster_choque", "firmware": "Reestructura códigos relacionales arcaicos mediante mutaciones sentidas que elevan el colectivo."},
     50: {"entropia": "Corrupción", "coherencia": "Equilibrio", "resonancia": "Armonía", "bits": "011101", "pair": 3, "ring": "cluster_aspartico", "firmware": "Preserva valores y leyes éticas esenciales protegiendo la cohesión armónica de las generaciones."},
     51: {"entropia": "Agitación", "coherencia": "Iniciativa", "resonancia": "Despertar", "bits": "100100", "pair": 57, "ring": "cluster_arginina", "firmware": "Transforma el impacto del shock inesperado en propulsión audaz para abrir nuevos senderos."},
@@ -171,11 +186,11 @@ CORE64_CATALOG = {
     53: {"entropia": "Inmadurez", "coherencia": "Expansión", "resonancia": "Superabundancia", "bits": "001011", "pair": 54, "ring": "cluster_serina", "firmware": "Inicia proyectos con base madura permitiendo un crecimiento continuado sin desgastes tempranos."},
     54: {"entropia": "Codicia", "coherencia": "Aspiración", "resonancia": "Ascensión", "bits": "110100", "pair": 53, "ring": "cluster_serina", "firmware": "Canaliza ambición mundana hacia la elevación del espíritu y proyectos de trascendencia comunitaria."},
     55: {"entropia": "Victimización", "coherencia": "Libertad", "resonancia": "Emancipación", "bits": "101100", "pair": 59, "ring": "cluster_choque", "firmware": "Muta la oscilación melancólica del plexo solar en libertad soberana y desapego creador."},
-    56: {"entropia": "Distracción", "coherencia": "Enriquecimiento", "resonancia": "Intoxicación Divina", "bits": "110110", "pair": 60, "ring": "cluster_leucina", "firmware": "Usa relatos y anécdotas para ilustrar aprendizajes de vida cautivando el corazón de otros."},
+    56: {"entropia": "Distracción", "coherencia": "Enriquecimiento", "resonancia": "Intoxicación Divina", "bits": "001101", "pair": 60, "ring": "cluster_leucina", "firmware": "Usa relatos y anécdotas para ilustrar aprendizajes de vida cautivando el corazón de otros."},
     57: {"entropia": "Inquietud", "coherencia": "Intuición", "resonancia": "Claridad", "bits": "011011", "pair": 51, "ring": "cluster_alanina_a", "firmware": "Escucha las vibraciones más sutiles en el presente inmediato anticipando peligros o aperturas."},
     58: {"entropia": "Insatisfacción", "coherencia": "Vitalidad", "resonancia": "Dicha", "bits": "110110", "pair": 52, "ring": "cluster_serina", "firmware": "Usa la insatisfacción somática como motor de servicio entusiasta para optimizar el entorno."},
     59: {"entropia": "Deshonestidad", "coherencia": "Intimidad", "resonancia": "Transparencia", "bits": "010011", "pair": 55, "ring": "cluster_glutamico", "firmware": "Disuelve barreras de desconfianza facilitando apertura profunda y conexión transparente."},
-    60: {"entropia": "Limitación", "coherencia": "Realismo", "resonancia": "Justicia", "bits": "010010", "pair": 56, "ring": "cluster_isoleucina", "firmware": "Acepta restricciones materiales usándolas como molde creativo donde estalla la magia contenida."},
+    60: {"entropia": "Limitación", "coherencia": "Realismo", "resonancia": "Justicia", "bits": "110010", "pair": 56, "ring": "cluster_isoleucina", "firmware": "Acepta restricciones materiales usándolas como molde creativo donde estalla la magia contenida."},
     61: {"entropia": "Psicosis", "coherencia": "Inspiración", "resonancia": "Santidad", "bits": "110011", "pair": 62, "ring": "cluster_isoleucina", "firmware": "Penetra el misterio de lo desconocido trayendo revelaciones lúcidas sin perder anclaje a la realidad."},
     62: {"entropia": "Intelecto", "coherencia": "Precisión", "resonancia": "Impecabilidad", "bits": "001100", "pair": 61, "ring": "cluster_glutamina", "firmware": "Nombra y estructura fenómenos con lenguaje exacto y orden lógico de alta resolución operativa."},
     63: {"entropia": "Duda", "coherencia": "Indagación", "resonancia": "Verdad", "bits": "101010", "pair": 64, "ring": "cluster_prolina", "firmware": "Formula cuestionamientos científicos rigurosos sin volverse presa del cinismo sospechoso."},
@@ -512,7 +527,7 @@ SPHERES_METADATA = {
         "color": "#0284c7",
         "impacto": "Protección somática profunda ante la vulnerabilidad y apertura del corazón esencial."
     },
-    "NOT Vocación": {
+    "NOT Vocación / Núcleo": {
         "secuencia": "Polaridad NOT",
         "origen": "Antípoda NOT 6-bit",
         "simbolo": "∿",
@@ -536,35 +551,35 @@ SPHERES_METADATA = {
 
     # ── 4. ACTIVACIONES CÓSMICAS TRANSPERSONALES (MODO 26) ──
     "Motivación Consciente (Luna Natal)": {
-        "secuencia": "Consciente",
+        "secuencia": "Transpersonal",
         "origen": "Luna Natal (Consciente)",
         "simbolo": "☾",
         "color": "#f472b6",
         "impacto": "Fuerza motriz cotidiana, atención consciente y nutrición emocional inmediata del día a día."
     },
     "Voz / Comunicación (Mercurio Natal)": {
-        "secuencia": "Consciente",
+        "secuencia": "Transpersonal",
         "origen": "Mercurio Natal (Consciente)",
         "simbolo": "☿",
         "color": "#06b6d4",
         "impacto": "Interfaz verbal, expresión y traducción del Don en lenguaje estructurado comprensible."
     },
     "Voz Celular (Mercurio Design)": {
-        "secuencia": "Inconsciente",
+        "secuencia": "Transpersonal",
         "origen": "Mercurio Pre-natal (Voz Celular)",
         "simbolo": "☿",
         "color": "#0891b2",
         "impacto": "Transmisión biológica subconsciente, impulsos neuroquímicos e intuición corporal silenciosa."
     },
     "Ley / Disciplina (Saturno Natal)": {
-        "secuencia": "Consciente",
+        "secuencia": "Transpersonal",
         "origen": "Saturno Natal (Consciente)",
         "simbolo": "♄",
         "color": "#ca8a04",
         "impacto": "Estructura moral, límites firmes y leyes no negociables para contener la energía creativa."
     },
     "Límites Celulares (Saturno Design)": {
-        "secuencia": "Inconsciente",
+        "secuencia": "Transpersonal",
         "origen": "Saturno Pre-natal (Límites Celulares)",
         "simbolo": "♄",
         "color": "#a16207",
@@ -1268,6 +1283,13 @@ class DiscreteParticleEngine:
         """Inversor lógico NOT bit a bit: '110011' -> '001100'."""
         return "".join('0' if b == '1' else '1' for b in bits)
 
+    @staticmethod
+    def calculate_hamming_distance(bits_a: str, bits_b: str) -> int:
+        """Calcula la distancia de Hamming (0 a 6 bits de diferencia) entre dos cadenas binarias."""
+        return sum(1 for a, b in zip(bits_a, bits_b) if a != b)
+
+    hamming_distance = calculate_hamming_distance
+
     @classmethod
     def get_trigram_breakdown(cls, bits: str) -> Dict[str, Any]:
         """
@@ -1310,7 +1332,7 @@ class DiscreteParticleEngine:
         same_ring = (data_a.get("ring") == data_b.get("ring")) and (data_a.get("ring") != "")
         
         # Hamming distance entre ambas partículas (0 a 6 bits de diferencia)
-        hamming = sum(1 for a, b in zip(bits_a, bits_b) if a != b)
+        hamming = cls.calculate_hamming_distance(bits_a, bits_b)
         
         if is_antipode:
             tipo = "Antípoda (Inversión Lógica NOT)"
@@ -1423,15 +1445,32 @@ Estructura siempre tu respuesta en los siguientes 5 bloques estandarizados:
 
 Genera el Informe de Telemetría de Fase y Mapa de Situación siguiendo de manera estricta el System Prompt activo."""
 
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt_content}
-                ]
-            )
-            
-            full_text = response.get("message", {}).get("content", "")
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt_content}
+            ]
+
+            full_text = ""
+            try:
+                stream_resp = ollama.chat(
+                    model=self.model_name,
+                    messages=messages,
+                    stream=True
+                )
+                for chunk in stream_resp:
+                    msg_obj = getattr(chunk, "message", None) or (chunk.get("message", {}) if isinstance(chunk, dict) else {})
+                    piece = getattr(msg_obj, "content", None) if not isinstance(msg_obj, dict) else msg_obj.get("content", "")
+                    if piece:
+                        full_text += piece
+                        self.chunk_received.emit(piece)
+            except Exception:
+                response = ollama.chat(
+                    model=self.model_name,
+                    messages=messages
+                )
+                msg_obj = getattr(response, "message", None) or (response.get("message", {}) if isinstance(response, dict) else {})
+                full_text = (getattr(msg_obj, "content", None) if not isinstance(msg_obj, dict) else msg_obj.get("content", "")) or ""
+
             if not full_text:
                 full_text = "No se recibió respuesta del modelo Ollama."
                 
@@ -1470,7 +1509,7 @@ Genera el Informe de Telemetría de Fase y Mapa de Situación siguiendo de maner
         data_k = CORE64_CATALOG.get(k_num, {})
         pair_num = data_k.get("pair", 41)
         data_pair = CORE64_CATALOG.get(pair_num, {})
-        ring_name = data_k.get("ring", "Cluster no asignado")
+        ring_name = resolve_cluster_name(data_k.get("ring", "Cluster no asignado"))
         
         line_info = LINE_PROPERTIES.get(l_num, {})
         
@@ -1511,7 +1550,7 @@ class SemanticEmbeddingEngine:
     """
     Calcula vectores de embeddings vía Ollama (ej. 'nomic-embed-text' o 'mxbai-embed-large')
     o genera proyecciones semánticas deterministas para mapeo visual en el Radar Holográfico.
-    Incluye caché en memoria para maximizar velocidad en tiempo real.
+    Incluye caché en memoria y procesamiento por lotes (batching) para maximizar velocidad en tiempo real.
     """
     _CACHE: Dict[Tuple[str, str], np.ndarray] = {}
     
@@ -1527,10 +1566,11 @@ class SemanticEmbeddingEngine:
         try:
             try:
                 res = ollama.embeddings(model=model_name, prompt=text)
-                raw_vec = res.get("embedding", [])
+                raw_vec = getattr(res, "embedding", None) or (res.get("embedding", []) if isinstance(res, dict) else [])
             except Exception:
                 res = ollama.embed(model=model_name, input=text)
-                raw_vec = res.get("embeddings", [[]])[0] if res.get("embeddings") else []
+                embs = getattr(res, "embeddings", None) or (res.get("embeddings", []) if isinstance(res, dict) else [])
+                raw_vec = embs[0] if embs else []
             vec = np.array(raw_vec, dtype=np.float32)
             norm = np.linalg.norm(vec)
             if norm > 0:
@@ -1539,6 +1579,47 @@ class SemanticEmbeddingEngine:
             return vec
         except Exception:
             return None
+
+    @classmethod
+    def get_embeddings_batch(cls, texts: List[str], model_name: str = "nomic-embed-text:latest") -> List[Optional[np.ndarray]]:
+        """Obtiene una lista de vectores normalizados en una sola llamada HTTP por lotes a Ollama."""
+        if not OLLAMA_AVAILABLE:
+            return [None] * len(texts)
+
+        results: List[Optional[np.ndarray]] = [None] * len(texts)
+        missing_indices: List[int] = []
+        missing_texts: List[str] = []
+
+        for idx, t in enumerate(texts):
+            cache_key = (model_name, t)
+            if cache_key in cls._CACHE:
+                results[idx] = cls._CACHE[cache_key]
+            else:
+                missing_indices.append(idx)
+                missing_texts.append(t)
+
+        if not missing_texts:
+            return results
+
+        try:
+            res = ollama.embed(model=model_name, input=missing_texts)
+            embs = getattr(res, "embeddings", None) or (res.get("embeddings", []) if isinstance(res, dict) else [])
+            if embs and len(embs) == len(missing_texts):
+                for m_idx, raw_vec in zip(missing_indices, embs):
+                    vec = np.array(raw_vec, dtype=np.float32)
+                    norm = np.linalg.norm(vec)
+                    if norm > 0:
+                        vec = vec / norm
+                    cls._CACHE[(model_name, texts[m_idx])] = vec
+                    results[m_idx] = vec
+                return results
+        except Exception:
+            pass
+
+        # Fallback secuencial si el endpoint batch no está disponible en la versión de Ollama
+        for m_idx in missing_indices:
+            results[m_idx] = cls.get_embedding(texts[m_idx], model_name)
+        return results
 
     @staticmethod
     def cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
@@ -1588,13 +1669,10 @@ class EmbeddingWorker(QThread):
 
     def run(self):
         try:
-            user_vec = SemanticEmbeddingEngine.get_embedding(self.user_text, self.embed_model)
-            user_2d = SemanticEmbeddingEngine.project_to_2d(user_vec, seed=77)
-
-            key_projections = []
-            similarity_results = []
-
             total_keys = 64
+            key_texts: List[str] = []
+            key_meta_list: List[Tuple[int, str, str]] = []
+
             for kn in range(1, total_keys + 1):
                 k_data = CORE64_CATALOG.get(kn, {})
                 coh_val = k_data.get('coherencia', k_data.get('don', ''))
@@ -1602,15 +1680,34 @@ class EmbeddingWorker(QThread):
                 ent_val = k_data.get('entropia', k_data.get('sombra', ''))
                 k_cluster = resolve_cluster_name(k_data.get('ring', ''))
                 k_text = f"Vórtice {kn}: Coherencia {coh_val} Resonancia {res_val} Entropía {ent_val} {k_data.get('firmware')} {k_cluster}"
-                k_vec = SemanticEmbeddingEngine.get_embedding(k_text, self.embed_model)
+                key_texts.append(k_text)
+                key_meta_list.append((kn, coh_val, k_cluster))
 
+            # Batching vectorial: 1 sola petición para el texto del usuario + los 64 vórtices
+            all_vecs = SemanticEmbeddingEngine.get_embeddings_batch([self.user_text] + key_texts, self.embed_model)
+            user_vec = all_vecs[0]
+            key_vecs = all_vecs[1:]
+
+            # El usuario ocupa el centro gravitatorio del radar polar (0.0, 0.0)
+            user_2d = (0.0, 0.0)
+            key_projections = []
+            similarity_results = []
+
+            for idx, (kn, coh_val, k_cluster) in enumerate(key_meta_list):
+                k_vec = key_vecs[idx]
                 if k_vec is not None and user_vec is not None:
                     sim = SemanticEmbeddingEngine.cosine_similarity(user_vec, k_vec)
                     sim = max(0.0, (sim + 1.0) / 2.0)
                 else:
                     sim = 0.35 + 0.5 * (math.sin(kn * 0.45) * 0.5 + 0.5)
 
-                px, py = SemanticEmbeddingEngine.project_to_2d(k_vec, seed=kn * 10)
+                # Distancia radial inversamente proporcional a la similitud semántica (los más afines orbitan cerca del centro)
+                radius = max(0.12, min(0.95, 1.0 - (sim ** 1.4) * 0.85))
+                mandala_idx = HEXA_MANDALA_ORDER.index(kn) if kn in HEXA_MANDALA_ORDER else kn
+                angle_rad = math.radians(CelestialMechanicsEngine.THETA_0 + mandala_idx * CelestialMechanicsEngine.SECTOR_KEY)
+                px = radius * math.cos(angle_rad)
+                py = radius * math.sin(angle_rad)
+
                 key_projections.append((px, py, kn, coh_val, sim))
                 similarity_results.append((kn, coh_val, k_cluster, sim))
                 self.progress_step.emit(kn, total_keys)
@@ -1655,6 +1752,16 @@ class BioMandalaWheel(QWidget):
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._pulse_step)
         self.anim_timer.start(50)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.anim_timer.isActive():
+            self.anim_timer.start(50)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self.anim_timer.isActive():
+            self.anim_timer.stop()
 
     def _pulse_step(self):
         self.pulse_phase = (self.pulse_phase + 0.06) % (2.0 * math.pi)
@@ -2150,6 +2257,16 @@ class MultiParticleBridgeView(QWidget):
         self.timer.timeout.connect(self._step)
         self.timer.start(40)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.timer.isActive():
+            self.timer.start(40)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self.timer.isActive():
+            self.timer.stop()
+
     def _step(self):
         self.anim_t = (self.anim_t + 0.04) % 1.0
         self.update()
@@ -2190,7 +2307,7 @@ class MultiParticleBridgeView(QWidget):
         if "Antípoda" in coupling:
             line_col = QColor(255, 60, 120)
             wave_type = "laser"
-        elif "Anillo" in coupling:
+        elif "Clúster" in coupling or "Anillo" in coupling:
             line_col = QColor(0, 255, 179)
             wave_type = "organic"
         elif "Paralelo" in coupling:
@@ -2252,6 +2369,333 @@ class MultiParticleBridgeView(QWidget):
         painter.drawText(QRectF(pos.x() - r - 20, pos.y() + r + 2, r * 2 + 40, 14), Qt.AlignCenter, data.get("coherencia", data.get("don", "")))
 
 
+class ProfilesVaultManager:
+    """
+    Gestor de Bóveda Persistente de Perfiles Natales (profiles_vault.json).
+    Permite almacenar, cargar y eliminar configuraciones de nacimiento, huso horario
+    y coordenadas geográficas tanto en la Pestaña 01 como en la Pestaña 06 (Sinastría).
+    """
+    VAULT_FILENAME = "profiles_vault.json"
+
+    @classmethod
+    def get_vault_path(cls) -> str:
+        base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+        return os.path.join(base_dir, cls.VAULT_FILENAME)
+
+    @classmethod
+    def default_profiles(cls) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": "Mi Perfil Soberano",
+                "dt_str": "1990-05-21 14:30:00",
+                "utc_offset": 2.0,
+                "country": "España",
+                "city": "Madrid (Comunidad de Madrid)",
+                "lat": 40.4168,
+                "lon": -3.7038,
+                "topocentric": True
+            }
+        ]
+
+    @classmethod
+    def load_vault(cls) -> List[Dict[str, Any]]:
+        path = cls.get_vault_path()
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list) and data:
+                    return data
+            except Exception:
+                pass
+        defaults = cls.default_profiles()
+        cls.save_vault_list(defaults)
+        return defaults
+
+    @classmethod
+    def save_vault_list(cls, profiles: List[Dict[str, Any]]) -> None:
+        path = cls.get_vault_path()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(profiles, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    @classmethod
+    def save_profile(cls, profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+        profiles = cls.load_vault()
+        name = profile.get("name", "").strip()
+        if not name:
+            return profiles
+        updated = False
+        for idx, p in enumerate(profiles):
+            if p.get("name", "").strip().lower() == name.lower():
+                profiles[idx] = profile
+                updated = True
+                break
+        if not updated:
+            profiles.append(profile)
+        cls.save_vault_list(profiles)
+        return profiles
+
+    @classmethod
+    def delete_profile(cls, name: str) -> List[Dict[str, Any]]:
+        profiles = cls.load_vault()
+        profiles = [p for p in profiles if p.get("name", "").strip().lower() != name.strip().lower()]
+        cls.save_vault_list(profiles)
+        return profiles
+
+
+class BooleanHypercubeMatrixView(QWidget):
+    """
+    Matriz Interactiva del Hipercubo Booleano 8×8 (Trigrama Inferior × Trigrama Superior).
+    Ordena los 64 vórtices resonantes según sus trigramas inferiores (filas, bits 1-3) y
+    superiores (columnas, bits 4-6), iluminando en tiempo real:
+      - Vórtice Seleccionado (Cian #00f0ff)
+      - Antípoda Inversa NOT a distancia de Hamming DH = 6 (Magenta #f472b6)
+      - Los 6 Vecinos de Mutación de 1 bit a distancia de Hamming DH = 1 (Oro #fbbf24)
+      - Vórtices activos en la Carta Natal del Operador (Punto Esmeralda #10b981)
+    Clic izquierdo: inspecciona la partícula y la asigna a Partícula A.
+    Clic derecho (o Shift+Clic): envía la partícula a Partícula B en el simulador de puentes.
+    """
+    vortexSelected = Signal(int)
+    vortexBridgeBSelected = Signal(int)
+
+    TRIGRAM_ORDER = ["000", "100", "010", "110", "001", "101", "011", "111"]
+    TRIGRAM_SHORT = {
+        "000": "☷ 000 Tierra",
+        "100": "☳ 100 Trueno",
+        "010": "☵ 010 Agua",
+        "110": "☱ 110 Lago",
+        "001": "☶ 001 Mont.",
+        "101": "☲ 101 Fuego",
+        "011": "☴ 011 Viento",
+        "111": "☰ 111 Cielo"
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(380, 210)
+        self.setMaximumHeight(245)
+        self.setMouseTracking(True)
+        self.selected_key: int = 31
+        self.bridge_b_key: int = 41
+        self.natal_active_keys: set = set()
+        self.hovered_key: int = 0
+        self.cell_rects: Dict[int, QRectF] = {}
+
+        # Mapa inverso (lower_3bits, upper_3bits) -> key_num
+        self.grid_map: Dict[Tuple[str, str], int] = {}
+        for k_num, k_data in CORE64_CATALOG.items():
+            b = k_data.get("bits", "000000")
+            if len(b) == 6:
+                self.grid_map[(b[:3], b[3:])] = k_num
+
+    def set_selected_key(self, key_num: int, bridge_b_key: Optional[int] = None):
+        self.selected_key = key_num
+        if bridge_b_key is not None:
+            self.bridge_b_key = bridge_b_key
+        self.update()
+
+    def set_natal_active_keys(self, keys_set: set):
+        self.natal_active_keys = set(keys_set)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+
+        w, h = self.width(), self.height()
+        painter.setBrush(QBrush(QColor(8, 13, 24, 245)))
+        painter.setPen(QPen(QColor(0, 240, 255, 45), 1))
+        painter.drawRoundedRect(2, 2, w - 4, h - 4, 8, 8)
+
+        # Cabecera y leyenda compactas en una o dos líneas ajustadas
+        painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        painter.setPen(QColor(0, 240, 255))
+        painter.drawText(10, 15, "HIPERCUBO BOOLEANO 8×8 (TRIGRAMA INFERIOR × SUPERIOR)")
+
+        painter.setFont(QFont("Segoe UI", 7))
+        painter.setPen(QColor(148, 163, 184))
+        painter.drawText(10, 27, "🟦 Sel (K)   🟪 Antípoda NOT (DH=6)   🟨 Vecinos 1-Bit (DH=1)   🟢 Natal Activo   •   Clic Izq: K_A | Clic Der: K_B")
+
+        margin_left = 70.0
+        margin_top = 42.0
+        margin_right = 8.0
+        margin_bottom = 5.0
+
+        grid_w = max(80.0, w - margin_left - margin_right)
+        grid_h = max(80.0, h - margin_top - margin_bottom)
+        cell_w = grid_w / 8.0
+        cell_h = grid_h / 8.0
+
+        sel_bits = CORE64_CATALOG.get(self.selected_key, {}).get("bits", "001110")
+
+        # Dibujar encabezados de columnas (Trigrama Superior: Bits 4,5,6)
+        painter.setFont(QFont("Consolas", 7, QFont.Bold))
+        for c_idx, u_bits in enumerate(self.TRIGRAM_ORDER):
+            cx = margin_left + c_idx * cell_w
+            rect_hdr = QRectF(cx, margin_top - 14, cell_w, 13)
+            painter.setPen(QColor(147, 197, 253))
+            painter.drawText(rect_hdr, Qt.AlignCenter, self.TRIGRAM_SHORT[u_bits])
+
+        # Dibujar filas (Trigrama Inferior: Bits 1,2,3) y celdas 8x8
+        self.cell_rects.clear()
+        for r_idx, l_bits in enumerate(self.TRIGRAM_ORDER):
+            ry = margin_top + r_idx * cell_h
+            rect_row_hdr = QRectF(4, ry, margin_left - 8, cell_h)
+            painter.setFont(QFont("Consolas", 7, QFont.Bold))
+            painter.setPen(QColor(167, 243, 208))
+            painter.drawText(rect_row_hdr, Qt.AlignVCenter | Qt.AlignRight, self.TRIGRAM_SHORT[l_bits])
+
+            for c_idx, u_bits in enumerate(self.TRIGRAM_ORDER):
+                cx = margin_left + c_idx * cell_w
+                cell_rect = QRectF(cx + 1.0, ry + 1.0, cell_w - 2.0, cell_h - 2.0)
+                k_num = self.grid_map.get((l_bits, u_bits), 0)
+                if k_num <= 0:
+                    continue
+                self.cell_rects[k_num] = cell_rect
+
+                k_bits = l_bits + u_bits
+                dh = DiscreteParticleEngine.calculate_hamming_distance(sel_bits, k_bits)
+                is_selected = (k_num == self.selected_key)
+                is_not_pair = (dh == 6)
+                is_dh1 = (dh == 1)
+                is_bridge_b = (k_num == self.bridge_b_key and not is_selected)
+                is_natal = (k_num in self.natal_active_keys)
+                is_hover = (k_num == self.hovered_key)
+
+                # Color de fondo y borde según relación booleana con el vórtice activo
+                if is_selected:
+                    bg_col = QColor(0, 240, 255, 85)
+                    border_col = QColor(0, 240, 255, 255)
+                    border_w = 1.8
+                elif is_not_pair:
+                    bg_col = QColor(244, 114, 182, 80)
+                    border_col = QColor(244, 114, 182, 255)
+                    border_w = 1.8
+                elif is_dh1:
+                    bg_col = QColor(251, 191, 36, 48)
+                    border_col = QColor(251, 191, 36, 210)
+                    border_w = 1.3
+                elif is_bridge_b:
+                    bg_col = QColor(168, 85, 247, 60)
+                    border_col = QColor(192, 132, 252, 220)
+                    border_w = 1.4
+                elif is_natal:
+                    bg_col = QColor(16, 185, 129, 32)
+                    border_col = QColor(16, 185, 129, 130)
+                    border_w = 1.0
+                else:
+                    bg_col = QColor(15, 23, 42, 190)
+                    border_col = QColor(30, 41, 59, 180)
+                    border_w = 1.0
+
+                if is_hover:
+                    bg_col = bg_col.lighter(135)
+                    border_col = QColor(255, 255, 255, 240)
+                    border_w = 1.6
+
+                painter.setBrush(QBrush(bg_col))
+                painter.setPen(QPen(border_col, border_w))
+                painter.drawRoundedRect(cell_rect, 3, 3)
+
+                # Punto indicador si el vórtice está activo en la carta natal del usuario
+                if is_natal:
+                    painter.setBrush(QBrush(QColor(16, 185, 129)))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawEllipse(QPointF(cell_rect.right() - 4.5, cell_rect.top() + 4.5), 2.4, 2.4)
+
+                # Número de Vórtice (y etiqueta corta si hay ancho suficiente)
+                painter.setFont(QFont("Consolas", 7, QFont.Bold))
+                if is_selected:
+                    painter.setPen(QColor(255, 255, 255))
+                elif is_not_pair:
+                    painter.setPen(QColor(255, 210, 235))
+                elif is_dh1:
+                    painter.setPen(QColor(254, 240, 138))
+                else:
+                    painter.setPen(QColor(226, 232, 240))
+
+                if cell_h < 22:
+                    # Modo ultra-compacto de una sola línea por celda
+                    lbl_cell = f"V{k_num}"
+                    if is_not_pair:
+                        lbl_cell += "·NOT"
+                    elif is_dh1:
+                        lbl_cell += "·DH1"
+                    elif cell_w >= 68:
+                        lbl_cell += f" {k_bits}"
+                    painter.drawText(cell_rect, Qt.AlignCenter, lbl_cell)
+                else:
+                    painter.drawText(
+                        QRectF(cell_rect.left(), cell_rect.top() + 0.5, cell_rect.width(), cell_rect.height() * 0.54),
+                        Qt.AlignCenter,
+                        f"V{k_num}"
+                    )
+                    painter.setFont(QFont("Consolas", 6))
+                    if is_not_pair:
+                        painter.setPen(QColor(244, 114, 182))
+                        sub_txt = "NOT"
+                    elif is_dh1:
+                        painter.setPen(QColor(251, 191, 36))
+                        sub_txt = "DH=1"
+                    else:
+                        painter.setPen(QColor(100, 116, 139))
+                        sub_txt = k_bits
+                    painter.drawText(
+                        QRectF(cell_rect.left(), cell_rect.top() + cell_rect.height() * 0.48, cell_rect.width(), cell_rect.height() * 0.50),
+                        Qt.AlignCenter,
+                        sub_txt
+                    )
+
+    def mouseMoveEvent(self, event):
+        pos = event.position()
+        found_k = 0
+        for k_num, rect in self.cell_rects.items():
+            if rect.contains(pos):
+                found_k = k_num
+                break
+        if found_k != self.hovered_key:
+            self.hovered_key = found_k
+            self.update()
+        if found_k > 0:
+            k_data = CORE64_CATALOG.get(found_k, {})
+            sel_bits = CORE64_CATALOG.get(self.selected_key, {}).get("bits", "000000")
+            k_bits = k_data.get("bits", "000000")
+            dh = DiscreteParticleEngine.calculate_hamming_distance(sel_bits, k_bits)
+            natal_tag = "🟢 ACTIVO EN TU CARTA NATAL\n" if found_k in self.natal_active_keys else ""
+            tip = (
+                f"🔷 Vórtice Resonante V{found_k} [{k_bits}]\n"
+                f"{natal_tag}"
+                f"• Entropía (E): {k_data.get('entropia', '')}\n"
+                f"• Coherencia (C): {k_data.get('coherencia', '')}\n"
+                f"• Resonancia (R): {k_data.get('resonancia', '')}\n"
+                f"• Clúster: {resolve_cluster_name(k_data.get('ring', ''))}\n"
+                f"• Distancia de Hamming a V{self.selected_key}: DH = {dh} bits\n"
+                f"────────────────────────────\n"
+                f"🖱️ Clic Izquierdo: Inspeccionar V{found_k} (Emisor K_A)\n"
+                f"🖱️ Clic Derecho / Shift+Clic: Enviar V{found_k} a Receptor K_B"
+            )
+            QToolTip.showText(event.globalPosition().toPoint(), tip, self)
+        else:
+            QToolTip.hideText()
+
+    def mousePressEvent(self, event):
+        pos = event.position()
+        for k_num, rect in self.cell_rects.items():
+            if rect.contains(pos):
+                if event.button() == Qt.RightButton or (event.modifiers() & Qt.ShiftModifier):
+                    self.bridge_b_key = k_num
+                    self.vortexBridgeBSelected.emit(k_num)
+                else:
+                    self.selected_key = k_num
+                    self.vortexSelected.emit(k_num)
+                self.update()
+                break
+
+
 class HolographicRadarView(QWidget):
     """
     Radar Holográfico 2D para visualización de Embeddings Semánticos y Resonancia Cuántica.
@@ -2268,6 +2712,16 @@ class HolographicRadarView(QWidget):
         self.sweep_timer = QTimer(self)
         self.sweep_timer.timeout.connect(self._sweep)
         self.sweep_timer.start(50)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.sweep_timer.isActive():
+            self.sweep_timer.start(50)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self.sweep_timer.isActive():
+            self.sweep_timer.stop()
 
     def _sweep(self):
         self.radar_angle = (self.radar_angle + 2.5) % 360.0
@@ -2495,14 +2949,19 @@ class NetworkSynastryEngine:
                 "description": f"Ambos operan en el Vórtice Resonante {sk}. Máxima afinidad o amplificación de sombras en espejo."
             })
 
-        # 3. Antípodas Cruzadas / Tensiones NOT (Hamming DH = 6)
+        # 3. Antípodas Cruzadas / Tensiones NOT (Hamming DH = 6, sin duplicar ejes simétricos)
         antipode_crossings = []
-        for ka in unique_keys_a:
+        seen_antipode_pairs = set()
+        for ka in sorted(unique_keys_a):
             bits_a = CORE64_CATALOG.get(ka, {}).get("bits", "000000")
             not_bits_a = DiscreteParticleEngine.get_not_antipode(bits_a)
-            for kb in unique_keys_b:
+            for kb in sorted(unique_keys_b):
                 bits_b = CORE64_CATALOG.get(kb, {}).get("bits", "000000")
                 if bits_b == not_bits_a:
+                    pair_sig = tuple(sorted((ka, kb)))
+                    if pair_sig in seen_antipode_pairs:
+                        continue
+                    seen_antipode_pairs.add(pair_sig)
                     data_a = CORE64_CATALOG.get(ka, {})
                     data_b = CORE64_CATALOG.get(kb, {})
                     antipode_crossings.append({
@@ -2585,6 +3044,16 @@ class NetworkCouplingGraphView(QWidget):
         self.timer.timeout.connect(self._step)
         self.timer.start(40)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.timer.isActive():
+            self.timer.start(40)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self.timer.isActive():
+            self.timer.stop()
+
     def _step(self):
         self.anim_t = (self.anim_t + 0.03) % 1.0
         self.update()
@@ -2611,10 +3080,12 @@ class NetworkCouplingGraphView(QWidget):
         name_b = self.synastry_data.get("name_b", "Sujeto Beta")
         eta_val = self.synastry_data.get("relational_resonance_index", 0.0)
 
-        # Encabezado
+        # Encabezado con recorte inteligente (elidedText) para no solapar con η_red
         painter.setFont(QFont("Segoe UI", 10, QFont.Bold))
         painter.setPen(QColor(0, 240, 255, 240))
-        painter.drawText(16, 26, f"ACOPLAMIENTO DE RED BIO-ELECTROMAGNÉTICO: {name_a.upper()} ⟷ {name_b.upper()}")
+        header_title = f"ACOPLAMIENTO BIO-ELECTROMAGNÉTICO: {name_a.upper()} ⟷ {name_b.upper()}"
+        elided_title = painter.fontMetrics().elidedText(header_title, Qt.ElideRight, max(120, int(w - 250)))
+        painter.drawText(16, 26, elided_title)
 
         painter.setFont(QFont("Consolas", 9, QFont.Bold))
         col_res = QColor(0, 255, 179) if eta_val > 0.6 else QColor(255, 200, 50)
@@ -2630,8 +3101,9 @@ class NetworkCouplingGraphView(QWidget):
             painter.drawText(QRectF(0, 0, w, h), Qt.AlignCenter, "Carga o calcula dos perfiles para visualizar la red de acoplamiento multipartícula.")
             return
 
-        # Posiciones de los nodos de A (Izquierda) y B (Derecha)
-        items_a = list(spheres_a.items())[:12] # Muestra las claves principales de cada perfil
+        # Posiciones de los nodos de A (Izquierda) y B (Derecha), indexados por nombre de esfera
+        # para garantizar que dos esferas en el mismo vórtice nunca se pisen en el eje Y.
+        items_a = list(spheres_a.items())[:12]
         items_b = list(spheres_b.items())[:12]
 
         x_left = 110.0
@@ -2639,69 +3111,78 @@ class NetworkCouplingGraphView(QWidget):
         step_y_a = (h - 80) / max(1, len(items_a))
         step_y_b = (h - 80) / max(1, len(items_b))
 
-        pos_map_a: Dict[int, QPointF] = {}
+        node_pos_a: Dict[str, QPointF] = {}
+        key_positions_a: Dict[int, List[QPointF]] = {}
         for idx, (s_name, s_info) in enumerate(items_a):
             py = 50.0 + idx * step_y_a + step_y_a * 0.5
-            pos_map_a[s_info.get("key", 0)] = QPointF(x_left, py)
+            pt = QPointF(x_left, py)
+            node_pos_a[s_name] = pt
+            key_positions_a.setdefault(s_info.get("key", 0), []).append(pt)
 
-        pos_map_b: Dict[int, QPointF] = {}
+        node_pos_b: Dict[str, QPointF] = {}
+        key_positions_b: Dict[int, List[QPointF]] = {}
         for idx, (s_name, s_info) in enumerate(items_b):
             py = 50.0 + idx * step_y_b + step_y_b * 0.5
-            pos_map_b[s_info.get("key", 0)] = QPointF(x_right, py)
+            pt = QPointF(x_right, py)
+            node_pos_b[s_name] = pt
+            key_positions_b.setdefault(s_info.get("key", 0), []).append(pt)
 
         # 1. Dibujar Enlaces de Canales Electromagnéticos Directos (Color Cian / Dorado resplandeciente)
         closed_ch = self.synastry_data.get("closed_channels", [])
         for ch in closed_ch:
             ka = ch.get("key_a", 0)
             kb = ch.get("key_b", 0)
-            pt_a = pos_map_a.get(ka) or pos_map_a.get(kb)
-            pt_b = pos_map_b.get(kb) or pos_map_b.get(ka)
-            if pt_a and pt_b:
-                pen = QPen(QColor(0, 240, 255, 200), 2.2)
-                painter.setPen(pen)
-                painter.drawLine(pt_a, pt_b)
+            pts_a = key_positions_a.get(ka) or key_positions_a.get(kb) or []
+            pts_b = key_positions_b.get(kb) or key_positions_b.get(ka) or []
+            for pt_a in pts_a:
+                for pt_b in pts_b:
+                    pen = QPen(QColor(0, 240, 255, 200), 2.2)
+                    painter.setPen(pen)
+                    painter.drawLine(pt_a, pt_b)
 
-                # Paquete de energía animado
-                px = pt_a.x() + (pt_b.x() - pt_a.x()) * self.anim_t
-                py = pt_a.y() + (pt_b.y() - pt_a.y()) * self.anim_t
-                painter.setBrush(QBrush(QColor(255, 255, 255)))
-                painter.setPen(QPen(QColor(0, 240, 255), 2))
-                painter.drawEllipse(QPointF(px, py), 4, 4)
+                    # Paquete de energía animado
+                    px = pt_a.x() + (pt_b.x() - pt_a.x()) * self.anim_t
+                    py = pt_a.y() + (pt_b.y() - pt_a.y()) * self.anim_t
+                    painter.setBrush(QBrush(QColor(255, 255, 255)))
+                    painter.setPen(QPen(QColor(0, 240, 255), 2))
+                    painter.drawEllipse(QPointF(px, py), 4, 4)
 
         # 2. Dibujar Antípodas NOT (Color Rosa Neón)
         antipodes = self.synastry_data.get("antipode_crossings", [])
         for ant in antipodes:
             ka = ant.get("key_a", 0)
             kb = ant.get("key_b", 0)
-            pt_a = pos_map_a.get(ka)
-            pt_b = pos_map_b.get(kb)
-            if pt_a and pt_b:
-                pen = QPen(QColor(244, 114, 182, 160), 1.6, Qt.DashLine)
-                painter.setPen(pen)
-                painter.drawLine(pt_a, pt_b)
+            pts_a = key_positions_a.get(ka) or key_positions_a.get(kb) or []
+            pts_b = key_positions_b.get(kb) or key_positions_b.get(ka) or []
+            for pt_a in pts_a:
+                for pt_b in pts_b:
+                    pen = QPen(QColor(244, 114, 182, 160), 1.6, Qt.DashLine)
+                    painter.setPen(pen)
+                    painter.drawLine(pt_a, pt_b)
 
         # 3. Dibujar Nodos Compartidos (Color Esmeralda)
         companionships = self.synastry_data.get("companionship_nodes", [])
         for comp in companionships:
             k = comp.get("key", 0)
-            pt_a = pos_map_a.get(k)
-            pt_b = pos_map_b.get(k)
-            if pt_a and pt_b:
-                pen = QPen(QColor(0, 255, 179, 130), 1.2, Qt.DotLine)
-                painter.setPen(pen)
-                painter.drawLine(pt_a, pt_b)
+            pts_a = key_positions_a.get(k, [])
+            pts_b = key_positions_b.get(k, [])
+            for pt_a in pts_a:
+                for pt_b in pts_b:
+                    pen = QPen(QColor(0, 255, 179, 130), 1.2, Qt.DotLine)
+                    painter.setPen(pen)
+                    painter.drawLine(pt_a, pt_b)
 
         # Dibujar Nodos de Sujeto Alfa
         for s_name, s_info in items_a:
             k = s_info.get("key", 0)
-            pos = pos_map_a.get(k)
+            pos = node_pos_a.get(s_name)
             if pos:
                 self._draw_synastry_node(painter, pos, k, s_name, s_info, QColor(0, 240, 255), align_left=True)
 
         # Dibujar Nodos de Sujeto Beta
         for s_name, s_info in items_b:
             k = s_info.get("key", 0)
-            pos = pos_map_b.get(k)
+            pos = node_pos_b.get(s_name)
             if pos:
                 self._draw_synastry_node(painter, pos, k, s_name, s_info, QColor(251, 191, 36), align_left=False)
 
@@ -3308,6 +3789,12 @@ class HexaMatrixInteractiveApp(QMainWindow):
         self._build_tab_network_synastry()
         self._build_tab_theory_and_directives()
 
+        # Inicializar bóveda de perfiles y estado de las pestañas 02 y 03 al arrancar
+        self._refresh_vault_combos()
+        self._on_key_selected()
+        self._update_bridge_simulator()
+        self._on_state_vector_changed()
+
         # ── Barra de Estado Inferior ──
         self.statusBar().setStyleSheet("background: #060911; color: #64748b; font-size: 11px; border-top: 1px solid #1e293b; padding: 4px;")
         if getattr(self, "ollama_online", False):
@@ -3343,6 +3830,30 @@ class HexaMatrixInteractiveApp(QMainWindow):
         ctrl_group = QGroupBox("Mecánica Celeste, Geo-Atlas & Normalización Temporal (UTC)")
         ctrl_layout = QVBoxLayout(ctrl_group)
         ctrl_layout.setSpacing(6)
+
+        # Fila 0 (Expansión 3): Bóveda Persistente de Perfiles Natales (profiles_vault.json)
+        vault_row = QHBoxLayout()
+        vault_row.addWidget(QLabel("🗂️ Bóveda:"))
+        self.combo_vault_p1 = QComboBox()
+        self.combo_vault_p1.setMinimumWidth(160)
+        self.combo_vault_p1.setToolTip("Selecciona un perfil guardado en profiles_vault.json para cargarlo al instante")
+        self.combo_vault_p1.activated.connect(self._on_vault_p1_selected)
+        vault_row.addWidget(self.combo_vault_p1, stretch=2)
+
+        self.txt_vault_name_p1 = QLineEdit("Mi Perfil Soberano")
+        self.txt_vault_name_p1.setPlaceholderText("Nombre del perfil...")
+        vault_row.addWidget(self.txt_vault_name_p1, stretch=2)
+
+        btn_vault_save_p1 = QPushButton("💾 Guardar Perfil")
+        btn_vault_save_p1.setToolTip("Guarda la fecha, hora, huso horario y coordenadas actuales en profiles_vault.json")
+        btn_vault_save_p1.clicked.connect(self._save_vault_profile_p1)
+        vault_row.addWidget(btn_vault_save_p1)
+
+        btn_vault_del_p1 = QPushButton("🗑️ Eliminar")
+        btn_vault_del_p1.setToolTip("Elimina el perfil seleccionado de profiles_vault.json")
+        btn_vault_del_p1.clicked.connect(self._delete_vault_profile_p1)
+        vault_row.addWidget(btn_vault_del_p1)
+        ctrl_layout.addLayout(vault_row)
 
         # Fila 1: Selector de Fecha y Hora Local
         date_row = QHBoxLayout()
@@ -3435,7 +3946,7 @@ class HexaMatrixInteractiveApp(QMainWindow):
         self.lbl_tz_conversion.setStyleSheet("font-family: Consolas; font-size: 11px; color: #00f0ff; background: #08111e; padding: 6px 10px; border-radius: 6px; border: 1px solid #0284c7;")
         ctrl_layout.addWidget(self.lbl_tz_conversion)
 
-        # Fila 6: Botones de Acción Rápida (Ahora Local, Tránsitos en Vivo, Exportar Perfil)
+        # Fila 6: Botones de Acción Rápida (Ahora Local, Tránsitos en Vivo, Exportar Perfil, Exportar Dossier)
         actions_row = QHBoxLayout()
         btn_now = QPushButton("⏱️ Ahora Local")
         btn_now.clicked.connect(self._set_current_now)
@@ -3472,6 +3983,15 @@ class HexaMatrixInteractiveApp(QMainWindow):
         btn_export.setToolTip("Exporta el perfil completo de la red activa con sus coordenadas, entropía, coherencia y resonancia a JSON, Markdown y Portapapeles")
         btn_export.clicked.connect(self._export_full_profile)
         actions_row.addWidget(btn_export)
+
+        self.btn_export_dossier = QPushButton("📄 Exportar Dossier")
+        self.btn_export_dossier.setObjectName("btnNeonGold")
+        self.btn_export_dossier.setToolTip(
+            "Genera el Dossier Ejecutivo Soberano en PDF (ReportLab) y HTML Bio-SciFi con los 26 Nodos Activos, "
+            "renderizado de alta resolución del BioMandalaWheel y la Síntesis Ontológica (Espíritu ⟷ Algoritmo)."
+        )
+        self.btn_export_dossier.clicked.connect(self._export_executive_dossier)
+        actions_row.addWidget(self.btn_export_dossier)
 
         ctrl_layout.addLayout(actions_row)
         right_box.addWidget(ctrl_group)
@@ -3511,7 +4031,7 @@ class HexaMatrixInteractiveApp(QMainWindow):
         self.btn_filter_not.setVisible(False)
         filter_bar.addWidget(self.btn_filter_not)
 
-        self.btn_filter_trans = QPushButton("🌌 Transpersonal (7)")
+        self.btn_filter_trans = QPushButton("🌌 Transpersonal (11)")
         self.btn_filter_trans.clicked.connect(lambda: self._filter_spheres_view("Transpersonal"))
         self.btn_filter_trans.setVisible(False)
         filter_bar.addWidget(self.btn_filter_trans)
@@ -3580,6 +4100,29 @@ class HexaMatrixInteractiveApp(QMainWindow):
         btn_close_box.clicked.connect(lambda: (self.btn_toggle_transits.setChecked(False), self._toggle_transits_mode()))
         tb_header_row.addWidget(btn_close_box)
         transits_box_layout.addLayout(tb_header_row)
+
+        # Expansión 1: Time-Scrubber Interactivo de Tránsitos (±30 días = -720h a +720h, paso 1h)
+        scrubber_row = QHBoxLayout()
+        scrubber_row.setSpacing(8)
+        self.lbl_transit_offset = QLabel("⏱️ Δt: 0 h (Ahora)")
+        self.lbl_transit_offset.setStyleSheet("font-family: Consolas; font-size: 11px; font-weight: bold; color: #fbbf24; min-width: 145px;")
+        scrubber_row.addWidget(self.lbl_transit_offset)
+
+        self.slider_transit_scrubber = QSlider(Qt.Horizontal)
+        self.slider_transit_scrubber.setRange(-720, 720)
+        self.slider_transit_scrubber.setSingleStep(1)
+        self.slider_transit_scrubber.setPageStep(24)
+        self.slider_transit_scrubber.setValue(0)
+        self.slider_transit_scrubber.setToolTip("Time-Scrubber (±30 días): Desliza entre -720 h y +720 h con paso de 1 h para explorar tránsitos pasados o futuros.")
+        self.slider_transit_scrubber.valueChanged.connect(self._on_transit_scrubber_changed)
+        scrubber_row.addWidget(self.slider_transit_scrubber, stretch=1)
+
+        btn_transit_now = QPushButton("⏮ Ahora")
+        btn_transit_now.setToolTip("Restablecer el Time-Scrubber a Δt = 0 h (Cielo Actual en Vivo)")
+        btn_transit_now.setStyleSheet("font-size: 10px; font-weight: bold; padding: 3px 8px; background: #0f172a; border: 1px solid #fbbf24; color: #fbbf24; border-radius: 4px;")
+        btn_transit_now.clicked.connect(lambda: self.slider_transit_scrubber.setValue(0))
+        scrubber_row.addWidget(btn_transit_now)
+        transits_box_layout.addLayout(scrubber_row)
 
         # Visor de texto enriquecido con scroll autónomo y formato HTML bioluminiscente
         self.txt_transit_weather = QTextBrowser()
@@ -3660,9 +4203,9 @@ class HexaMatrixInteractiveApp(QMainWindow):
         layout = QHBoxLayout(tab)
         layout.setSpacing(14)
 
-        # Columna Izquierda: Inspector de Partícula (Hexagrama de 6 bits y Trigramas)
+        # Columna Izquierda: Inspector de Partícula + Matriz del Hipercubo Booleano 8x8
         left_box = QVBoxLayout()
-        left_box.setSpacing(12)
+        left_box.setSpacing(8)
 
         picker_row = QHBoxLayout()
         picker_row.addWidget(QLabel("Seleccionar Vórtice Resonante (Operador 6-Bit):"))
@@ -3683,40 +4226,48 @@ class HexaMatrixInteractiveApp(QMainWindow):
         # Tarjeta de Morfología
         morph_group = QGroupBox("Morfología del Operador (Vórtice Resonante de 6 Bits)")
         morph_layout = QVBoxLayout(morph_group)
+        morph_layout.setSpacing(4)
 
         self.lbl_key_title = QLabel("VÓRTICE RESONANTE 31: ARROGANCIA + LIDERAZGO + HUMILDAD")
-        self.lbl_key_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #00f0ff;")
+        self.lbl_key_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #00f0ff;")
         morph_layout.addWidget(self.lbl_key_title)
 
         self.lbl_bits_display = QLabel("BITS: 0 0 1 1 1 0")
-        self.lbl_bits_display.setStyleSheet("font-family: Consolas; font-size: 18px; font-weight: bold; color: #fbbf24; letter-spacing: 4px; padding: 6px 0;")
+        self.lbl_bits_display.setStyleSheet("font-family: Consolas; font-size: 16px; font-weight: bold; color: #fbbf24; letter-spacing: 4px; padding: 2px 0;")
         morph_layout.addWidget(self.lbl_bits_display)
 
         # Trigramas
         self.lbl_trigram_lower = QLabel("Trigrama Inferior (Bits 1,2,3): Montaña (Gèn ☶) - Sustrato bio-somático")
-        self.lbl_trigram_lower.setStyleSheet("font-size: 11px; color: #a7f3d0; background: #0f172a; padding: 6px; border-radius: 4px;")
+        self.lbl_trigram_lower.setStyleSheet("font-size: 11px; color: #a7f3d0; background: #0f172a; padding: 4px; border-radius: 4px;")
         morph_layout.addWidget(self.lbl_trigram_lower)
 
         self.lbl_trigram_upper = QLabel("Trigrama Superior (Bits 4,5,6): Lago (Duì ☱) - Interfaz ambiental y proyección")
-        self.lbl_trigram_upper.setStyleSheet("font-size: 11px; color: #93c5fd; background: #0f172a; padding: 6px; border-radius: 4px;")
+        self.lbl_trigram_upper.setStyleSheet("font-size: 11px; color: #93c5fd; background: #0f172a; padding: 4px; border-radius: 4px;")
         morph_layout.addWidget(self.lbl_trigram_upper)
 
         # Antípoda Inversa (NOT) & Clúster Bioquímico
         self.lbl_pair_info = QLabel("Antípoda Inversa (Inversor Lógico NOT): Vórtice Resonante 41 [110001]")
-        self.lbl_pair_info.setStyleSheet("font-size: 12px; color: #f472b6; font-weight: bold; margin-top: 4px;")
+        self.lbl_pair_info.setStyleSheet("font-size: 11px; color: #f472b6; font-weight: bold; margin-top: 2px;")
         morph_layout.addWidget(self.lbl_pair_info)
 
         self.lbl_ring_info = QLabel(f"Clúster Bioquímico: {resolve_cluster_name(CORE64_CATALOG.get(31, {}).get('ring', ''))}")
-        self.lbl_ring_info.setStyleSheet("font-size: 12px; color: #c084fc;")
+        self.lbl_ring_info.setStyleSheet("font-size: 11px; color: #c084fc;")
         morph_layout.addWidget(self.lbl_ring_info)
 
         # 5 Propiedades de la Partícula
         self.txt_particle_properties = QTextEdit()
         self.txt_particle_properties.setReadOnly(True)
-        self.txt_particle_properties.setMaximumHeight(160)
-        morph_layout.addWidget(self.txt_particle_properties)
+        self.txt_particle_properties.setMinimumHeight(130)
+        morph_layout.addWidget(self.txt_particle_properties, stretch=1)
 
-        left_box.addWidget(morph_group)
+        left_box.addWidget(morph_group, stretch=1)
+
+        # Expansión 4: Matriz Interactiva del Hipercubo Booleano 8×8 (Trigrama Inferior × Trigrama Superior)
+        self.hypercube_view = BooleanHypercubeMatrixView()
+        self.hypercube_view.vortexSelected.connect(self._on_hypercube_vortex_clicked)
+        self.hypercube_view.vortexBridgeBSelected.connect(self._on_hypercube_bridge_b_clicked)
+        left_box.addWidget(self.hypercube_view, stretch=0)
+
         layout.addLayout(left_box, stretch=3)
 
         # Columna Derecha: Simulador de Puentes Multipartícula
@@ -4192,7 +4743,7 @@ class HexaMatrixInteractiveApp(QMainWindow):
 5. TOPOLOGÍA BINARIA DE 6 BITS Y ANTÍPODAS INVERSAS (NOT):
    - Cada uno de los 64 Vórtices Resonantes posee una firma binaria de 6 bits (Líneas 1 a 6 = Bits 0 a 5).
    - Antípoda Inversa (Inversor Lógico NOT): Complemento booleano bit a bit (~K) a distancia de Hamming DH = 6.
-     Ejemplo: Vórtice 1 (000000) <-> Vórtice 2 (111111); Vórtice 31 <-> Vórtice 41.
+     Ejemplo: Vórtice 1 (111111) <-> Vórtice 2 (000000); Vórtice 31 <-> Vórtice 41.
 
 6. LA ECUACIÓN DE ESTADO COTIDIANA (TERMODINÁMICA DE SISTEMAS ABIERTOS):
    - Vector S = [E, C, R] ∈ [0, 1]
@@ -4296,6 +4847,22 @@ class HexaMatrixInteractiveApp(QMainWindow):
         layout_a = QVBoxLayout(group_alpha)
         layout_a.setSpacing(6)
 
+        row_a_vault = QHBoxLayout()
+        row_a_vault.addWidget(QLabel("🗂️ Bóveda:"))
+        self.combo_vault_a = QComboBox()
+        self.combo_vault_a.setToolTip("Cargar perfil guardado desde profiles_vault.json en Sujeto Alfa")
+        self.combo_vault_a.activated.connect(self._on_vault_a_selected)
+        row_a_vault.addWidget(self.combo_vault_a, stretch=1)
+        btn_save_vault_a = QPushButton("💾 Guardar Perfil")
+        btn_save_vault_a.setToolTip("Guardar configuración de Sujeto Alfa en profiles_vault.json")
+        btn_save_vault_a.clicked.connect(self._save_vault_profile_a)
+        row_a_vault.addWidget(btn_save_vault_a)
+        btn_del_vault_a = QPushButton("🗑️ Eliminar")
+        btn_del_vault_a.setToolTip("Eliminar perfil seleccionado de profiles_vault.json")
+        btn_del_vault_a.clicked.connect(self._delete_vault_profile_a)
+        row_a_vault.addWidget(btn_del_vault_a)
+        layout_a.addLayout(row_a_vault)
+
         row_a_name = QHBoxLayout()
         row_a_name.addWidget(QLabel("Nombre / ID:"))
         self.txt_syn_name_a = QLineEdit("Sujeto Alfa")
@@ -4343,6 +4910,22 @@ class HexaMatrixInteractiveApp(QMainWindow):
         group_beta = QGroupBox("🟡 Sujeto Beta (Nodo Receptor / Pareja / Socio B)")
         layout_b = QVBoxLayout(group_beta)
         layout_b.setSpacing(6)
+
+        row_b_vault = QHBoxLayout()
+        row_b_vault.addWidget(QLabel("🗂️ Bóveda:"))
+        self.combo_vault_b = QComboBox()
+        self.combo_vault_b.setToolTip("Cargar perfil guardado desde profiles_vault.json en Sujeto Beta")
+        self.combo_vault_b.activated.connect(self._on_vault_b_selected)
+        row_b_vault.addWidget(self.combo_vault_b, stretch=1)
+        btn_save_vault_b = QPushButton("💾 Guardar Perfil")
+        btn_save_vault_b.setToolTip("Guardar configuración de Sujeto Beta en profiles_vault.json")
+        btn_save_vault_b.clicked.connect(self._save_vault_profile_b)
+        row_b_vault.addWidget(btn_save_vault_b)
+        btn_del_vault_b = QPushButton("🗑️ Eliminar")
+        btn_del_vault_b.setToolTip("Eliminar perfil seleccionado de profiles_vault.json")
+        btn_del_vault_b.clicked.connect(self._delete_vault_profile_b)
+        row_b_vault.addWidget(btn_del_vault_b)
+        layout_b.addLayout(row_b_vault)
 
         row_b_name = QHBoxLayout()
         row_b_name.addWidget(QLabel("Nombre / ID:"))
@@ -4578,12 +5161,23 @@ Tu misión es diagnosticar la interacción termodinámica entre Sujeto Alfa y Su
 Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de sistemas, física de información y gestión de energía."""
 
         model_name = self.combo_llm.currentText()
+        self._syn_streaming_started = False
         self.txt_syn_ai_output.setPlainText("⏳ Analizando acoplamiento electromagnético y calculando protocolo de delegación con IA...")
         self.statusBar().showMessage(f"🤖 Ejecutando auditoría de sinastría con modelo {model_name}...")
 
         self.syn_worker = OllamaTelemetryWorker(model_name, json.dumps(payload, indent=2, ensure_ascii=False), system_prompt=syn_system_prompt)
+        self.syn_worker.chunk_received.connect(self._on_synastry_ai_chunk)
         self.syn_worker.finished_success.connect(self._on_synastry_ai_finished)
         self.syn_worker.start()
+
+    def _on_synastry_ai_chunk(self, chunk: str):
+        if not getattr(self, "_syn_streaming_started", False):
+            self.txt_syn_ai_output.clear()
+            self._syn_streaming_started = True
+        cursor = self.txt_syn_ai_output.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(chunk)
+        self.txt_syn_ai_output.setTextCursor(cursor)
 
     def _on_synastry_ai_finished(self, text: str):
         self.txt_syn_ai_output.setPlainText(text)
@@ -4618,9 +5212,19 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
                 self._toggle_transit_viewer_height()
             self.statusBar().showMessage("Modo Tránsitos desactivado • Retorno a interfaz habitual completa.")
 
+    def _on_transit_scrubber_changed(self, val: int):
+        """Actualiza el desplazamiento horario Δt (±720h) del Time-Scrubber de tránsitos."""
+        if val == 0:
+            self.lbl_transit_offset.setText("⏱️ Δt: 0 h (Ahora)")
+        else:
+            self.lbl_transit_offset.setText(f"⏱️ Δt: {val:+d} h ({val/24.0:+.1f} d)")
+        if getattr(self, "transits_mode_active", False):
+            self._update_transits_and_interference()
+
     def _update_transits_and_interference(self):
-        """Calcula los tránsitos celestes actuales y evalúa la interferencia de onda con los 26 nodos natales."""
-        now_utc = datetime.now(timezone.utc)
+        """Calcula los tránsitos celestes (con soporte de Time-Scrubber ±30d) y evalúa la interferencia de onda."""
+        offset_h = self.slider_transit_scrubber.value() if hasattr(self, "slider_transit_scrubber") else 0
+        now_utc = datetime.now(timezone.utc) + timedelta(hours=offset_h)
         self.current_transits_data = RealTimeTransitEngine.calculate_transits(
             now_utc,
             lat_deg=self.geo_lat,
@@ -4641,6 +5245,7 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
         ignitions = interf.get("direct_ignitions", [])
         channels = interf.get("live_activated_channels", [])
         antipodes = interf.get("transit_antipodes", [])
+        delta_tag = "Cielo en Vivo (Δt = 0h)" if offset_h == 0 else f"Time-Scrubber Δt = {offset_h:+d}h ({offset_h/24.0:+.1f}d)"
 
         lines = [
             f"<div style='font-size: 13px; font-weight: bold; color: #fbbf24; margin-bottom: 4px;'>"
@@ -4648,7 +5253,7 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
             f"<span style='color: #38bdf8; font-size: 11px;'>(Intensidad: {interf.get('weather_intensity', 0)*100:.0f}%)</span>"
             f"</div>",
             f"<div style='font-family: Consolas; font-size: 11px; color: #94a3b8; margin-bottom: 8px;'>"
-            f"🌐 Coordenada Temporal: {interf.get('dt_utc')}"
+            f"🌐 Coordenada Temporal: {interf.get('dt_utc')} • <b style='color: #fbbf24;'>{delta_tag}</b>"
             f"</div>"
         ]
 
@@ -4684,7 +5289,10 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
             lines.append("<div style='color: #94a3b8; font-style: italic;'>El cielo en este instante no produce igniciones directas sobre tus cavidades nucleares. Ventana de baja fricción y flujo basal estable.</div>")
 
         html_body = "".join(lines)
+        v_bar = self.txt_transit_weather.verticalScrollBar()
+        saved_scroll = v_bar.value()
         self.txt_transit_weather.setHtml(html_body)
+        v_bar.setValue(saved_scroll)
 
         border_col = "#fbbf24" if (ignitions or channels) else "#38bdf8"
         self.txt_transit_weather.setStyleSheet(f"""
@@ -5260,6 +5868,743 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
         d_layout.addLayout(btn_row)
         dialog.exec()
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # EXPANSIÓN 3: BÓVEDA PERSISTENTE DE PERFILES NATALES (profiles_vault.json)
+    # ──────────────────────────────────────────────────────────────────────────
+    def _refresh_vault_combos(self, select_name: Optional[str] = None):
+        """Sincroniza los selectores de bóveda de las Pestañas 01 y 06 con profiles_vault.json."""
+        profiles = ProfilesVaultManager.load_vault()
+        combos = [
+            getattr(self, "combo_vault_p1", None),
+            getattr(self, "combo_vault_a", None),
+            getattr(self, "combo_vault_b", None)
+        ]
+        for cmb in combos:
+            if cmb is None:
+                continue
+            prev_text = select_name or cmb.currentText()
+            cmb.blockSignals(True)
+            cmb.clear()
+            for p in profiles:
+                p_name = p.get("name", "Perfil")
+                cmb.addItem(f"🗂️ {p_name}", p)
+            if prev_text:
+                clean_prev = prev_text.replace("🗂️ ", "").strip().lower()
+                for idx in range(cmb.count()):
+                    p_data = cmb.itemData(idx)
+                    if isinstance(p_data, dict) and p_data.get("name", "").strip().lower() == clean_prev:
+                        cmb.setCurrentIndex(idx)
+                        break
+            cmb.blockSignals(False)
+
+    def _apply_vault_profile_to_p1(self, p: Dict[str, Any]):
+        if not isinstance(p, dict):
+            return
+        name = p.get("name", "Perfil Soberano")
+        self.txt_vault_name_p1.setText(name)
+        dt_q = QDateTime.fromString(p.get("dt_str", "1990-05-21 14:30:00"), "yyyy-MM-dd HH:mm:ss")
+        if dt_q.isValid():
+            self.dt_local_picker.blockSignals(True)
+            self.dt_local_picker.setDateTime(dt_q)
+            self.dt_local_picker.blockSignals(False)
+
+        country = p.get("country", "España")
+        city = p.get("city", "")
+        if country in GEO_ATLAS:
+            self.combo_country.blockSignals(True)
+            self.combo_country.setCurrentText(country)
+            self.combo_country.blockSignals(False)
+            self.geo_country = country
+            self._populate_cities_for_country(country)
+            if city:
+                for i in range(self.combo_city.count()):
+                    if self.combo_city.itemText(i) == city:
+                        self.combo_city.blockSignals(True)
+                        self.combo_city.setCurrentIndex(i)
+                        self.combo_city.blockSignals(False)
+                        self.geo_city = city
+                        break
+
+        self.geo_lat = float(p.get("lat", self.geo_lat))
+        self.geo_lon = float(p.get("lon", self.geo_lon))
+        self.use_topocentric = bool(p.get("topocentric", True))
+        self.utc_offset_hours = float(p.get("utc_offset", self.utc_offset_hours))
+
+        self.spin_lat.blockSignals(True)
+        self.spin_lon.blockSignals(True)
+        self.chk_topocentric.blockSignals(True)
+        self.spin_utc_offset.blockSignals(True)
+
+        self.spin_lat.setValue(self.geo_lat)
+        self.spin_lon.setValue(self.geo_lon)
+        self.chk_topocentric.setChecked(self.use_topocentric)
+        self.spin_utc_offset.setValue(self.utc_offset_hours)
+
+        self.spin_lat.blockSignals(False)
+        self.spin_lon.blockSignals(False)
+        self.chk_topocentric.blockSignals(False)
+        self.spin_utc_offset.blockSignals(False)
+
+        self._on_offset_spin_changed(self.utc_offset_hours)
+        self.statusBar().showMessage(f"🗂️ Perfil «{name}» cargado desde profiles_vault.json en Pestaña 01.")
+
+    def _on_vault_p1_selected(self, idx: int):
+        p = self.combo_vault_p1.itemData(idx)
+        if isinstance(p, dict):
+            self._apply_vault_profile_to_p1(p)
+
+    def _save_vault_profile_p1(self):
+        name = self.txt_vault_name_p1.text().strip() or "Perfil Soberano"
+        profile = {
+            "name": name,
+            "dt_str": self.dt_local_picker.dateTime().toString("yyyy-MM-dd HH:mm:ss"),
+            "utc_offset": round(self.spin_utc_offset.value(), 2),
+            "country": self.combo_country.currentText(),
+            "city": self.combo_city.currentText(),
+            "lat": round(self.spin_lat.value(), 4),
+            "lon": round(self.spin_lon.value(), 4),
+            "topocentric": self.chk_topocentric.isChecked()
+        }
+        ProfilesVaultManager.save_profile(profile)
+        self._refresh_vault_combos(select_name=name)
+        self.statusBar().showMessage(f"💾 Perfil «{name}» guardado en {ProfilesVaultManager.VAULT_FILENAME}.")
+
+    def _delete_vault_profile_p1(self):
+        p = self.combo_vault_p1.currentData()
+        name = p.get("name", "") if isinstance(p, dict) else self.txt_vault_name_p1.text().strip()
+        if not name:
+            return
+        ProfilesVaultManager.delete_profile(name)
+        self._refresh_vault_combos()
+        self.statusBar().showMessage(f"🗑️ Perfil «{name}» eliminado de {ProfilesVaultManager.VAULT_FILENAME}.")
+
+    def _on_vault_a_selected(self, idx: int):
+        p = self.combo_vault_a.itemData(idx)
+        if not isinstance(p, dict):
+            return
+        self.txt_syn_name_a.setText(p.get("name", "Sujeto Alfa"))
+        dt_q = QDateTime.fromString(p.get("dt_str", ""), "yyyy-MM-dd HH:mm:ss")
+        if dt_q.isValid():
+            self.dt_syn_a.setDateTime(dt_q)
+        self.spin_syn_tz_a.setValue(float(p.get("utc_offset", 0.0)))
+        self.spin_syn_lat_a.setValue(float(p.get("lat", 40.4168)))
+        self.spin_syn_lon_a.setValue(float(p.get("lon", -3.7038)))
+        self.chk_syn_topo_a.setChecked(bool(p.get("topocentric", True)))
+        self.statusBar().showMessage(f"🗂️ Perfil «{p.get('name')}» cargado en Sujeto Alfa.")
+
+    def _save_vault_profile_a(self):
+        name = self.txt_syn_name_a.text().strip() or "Sujeto Alfa"
+        profile = {
+            "name": name,
+            "dt_str": self.dt_syn_a.dateTime().toString("yyyy-MM-dd HH:mm:ss"),
+            "utc_offset": round(self.spin_syn_tz_a.value(), 2),
+            "country": self.geo_country,
+            "city": self.geo_city,
+            "lat": round(self.spin_syn_lat_a.value(), 4),
+            "lon": round(self.spin_syn_lon_a.value(), 4),
+            "topocentric": self.chk_syn_topo_a.isChecked()
+        }
+        ProfilesVaultManager.save_profile(profile)
+        self._refresh_vault_combos(select_name=name)
+        self.statusBar().showMessage(f"💾 Perfil de Sujeto Alfa «{name}» guardado en {ProfilesVaultManager.VAULT_FILENAME}.")
+
+    def _delete_vault_profile_a(self):
+        p = self.combo_vault_a.currentData()
+        name = p.get("name", "") if isinstance(p, dict) else self.txt_syn_name_a.text().strip()
+        if name:
+            ProfilesVaultManager.delete_profile(name)
+            self._refresh_vault_combos()
+            self.statusBar().showMessage(f"🗑️ Perfil «{name}» eliminado de la bóveda.")
+
+    def _on_vault_b_selected(self, idx: int):
+        p = self.combo_vault_b.itemData(idx)
+        if not isinstance(p, dict):
+            return
+        self.txt_syn_name_b.setText(p.get("name", "Sujeto Beta"))
+        dt_q = QDateTime.fromString(p.get("dt_str", ""), "yyyy-MM-dd HH:mm:ss")
+        if dt_q.isValid():
+            self.dt_syn_b.setDateTime(dt_q)
+        self.spin_syn_tz_b.setValue(float(p.get("utc_offset", 0.0)))
+        self.spin_syn_lat_b.setValue(float(p.get("lat", 40.4168)))
+        self.spin_syn_lon_b.setValue(float(p.get("lon", -3.7038)))
+        self.chk_syn_topo_b.setChecked(bool(p.get("topocentric", True)))
+        self.statusBar().showMessage(f"🗂️ Perfil «{p.get('name')}» cargado en Sujeto Beta.")
+
+    def _save_vault_profile_b(self):
+        name = self.txt_syn_name_b.text().strip() or "Sujeto Beta"
+        profile = {
+            "name": name,
+            "dt_str": self.dt_syn_b.dateTime().toString("yyyy-MM-dd HH:mm:ss"),
+            "utc_offset": round(self.spin_syn_tz_b.value(), 2),
+            "country": self.geo_country,
+            "city": self.geo_city,
+            "lat": round(self.spin_syn_lat_b.value(), 4),
+            "lon": round(self.spin_syn_lon_b.value(), 4),
+            "topocentric": self.chk_syn_topo_b.isChecked()
+        }
+        ProfilesVaultManager.save_profile(profile)
+        self._refresh_vault_combos(select_name=name)
+        self.statusBar().showMessage(f"💾 Perfil de Sujeto Beta «{name}» guardado en {ProfilesVaultManager.VAULT_FILENAME}.")
+
+    def _delete_vault_profile_b(self):
+        p = self.combo_vault_b.currentData()
+        name = p.get("name", "") if isinstance(p, dict) else self.txt_syn_name_b.text().strip()
+        if name:
+            ProfilesVaultManager.delete_profile(name)
+            self._refresh_vault_combos()
+            self.statusBar().showMessage(f"🗑️ Perfil «{name}» eliminado de la bóveda.")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # EXPANSIÓN 5: EXPORTADOR DE DOSSIER EJECUTIVO (PDF REPORTLAB & HTML BIO-SCIFI)
+    # ──────────────────────────────────────────────────────────────────────────
+    def _export_executive_dossier(self, direct_pdf_path: Optional[str] = None, direct_html_path: Optional[str] = None):
+        """
+        Genera el Dossier Ejecutivo Soberano para los 26 Nodos Activos (Matriz Cósmica Total),
+        renderizando el BioMandalaWheel e integrando el Punto Medio de Coherencia
+        (Espíritu ⟷ Algoritmo) de ESPIRITU_ALGORITMO_Y_COHERENCIA.md.
+        Permite exportar directamente a PDF nativo (con ReportLab) y a HTML Bio-SciFi.
+        """
+        if isinstance(direct_pdf_path, bool):
+            direct_pdf_path = None
+        # 1. Calcular siempre la Matriz Cósmica Total de 26 Nodos para el Dossier Completo
+        cosmic_26 = CelestialMechanicsEngine.calculate_activation_matrix(
+            self.current_utc,
+            lat_deg=self.geo_lat,
+            lon_deg=self.geo_lon,
+            use_topocentric=self.use_topocentric,
+            matrix_mode="cosmic_26"
+        )
+        spheres_26 = cosmic_26.get("spheres", {})
+        dt_local_str = self.current_local_dt.strftime("%Y-%m-%d %H:%M:%S")
+        dt_utc_str = self.current_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+        profile_name = self.txt_vault_name_p1.text().strip() if hasattr(self, "txt_vault_name_p1") else "Operador Soberano"
+
+        e_val = self.slider_e.value() / 100.0
+        c_val = self.slider_c.value() / 100.0
+        r_val = self.slider_r.value() / 100.0
+        bio_yield, regimen, prescripcion = CelestialMechanicsEngine.calculate_biological_yield(e_val, c_val, r_val)
+
+        # 2. Renderizar BioMandalaWheel con los 26 nodos a PNG en memoria
+        prev_spheres = self.mandala_wheel.spheres_data
+        self.mandala_wheel.set_profile_data(spheres_26, self.selected_sphere)
+        pixmap: QPixmap = self.mandala_wheel.grab()
+        self.mandala_wheel.set_profile_data(prev_spheres, self.selected_sphere)
+
+        qbuf = QBuffer()
+        qbuf.open(QIODevice.WriteOnly)
+        pixmap.save(qbuf, "PNG")
+        png_bytes = bytes(qbuf.data())
+        qbuf.close()
+        b64_wheel = base64.b64encode(png_bytes).decode("ascii")
+
+        # Diagnóstico del Punto Medio Ontológico (Espíritu ⟷ Algoritmo) según el vector actual
+        if c_val >= 0.6 and r_val >= 0.6 and e_val <= 0.45:
+            onto_diag = (
+                "COHERENCIA INTEGRADA (LÁSER COLIMADO): Tu estado actual equilibra la chispa de indeterminación "
+                "del Espíritu (R) con la disciplina geométrica del Algoritmo (C). El hardware de 64 vórtices opera "
+                "como lente óptico y vitral sagrado sin colapsar en rigidez mecánica ni disolución etérea."
+            )
+        elif r_val > c_val + 0.25:
+            onto_diag = (
+                "POLARIZACIÓN EN ESPÍRITU SIN LENTE (R > C): Alta apertura al campo de Resonancia, pero riesgo de "
+                "«Luz sin lente» (desconexión somática o rechazo de la restricción geométrica). "
+                "Punto Medio requerido: Honrar el Algoritmo anclando un artefacto tangible en los próximos 60 minutos."
+            )
+        elif c_val > r_val + 0.25:
+            onto_diag = (
+                "POLARIZACIÓN EN ALGORITMO SIN PULSO (C > R): Alta estructuración directiva, pero riesgo de "
+                "«Reloj sin pulsación vital» (determinismo rígido y agotamiento). "
+                "Punto Medio requerido: Vaciar el cálculo como cáliz receptor para alojar reposo basal sin culpa."
+            )
+        else:
+            onto_diag = (
+                "FRICCIÓN ENTRÓPICA DE ACOPLAMIENTO: El choque entre forma algorítmica y aliento vital genera calor "
+                "reactivo (E). Punto Medio requerido: Celebrar la restricción de 6 bits como el instrumento exacto "
+                "de la encarnación soberana."
+            )
+
+        # 3. Construir documento HTML Bio-SciFi autocontenido
+        rows_html = []
+        for idx_s, (sph_name, s_data) in enumerate(spheres_26.items(), start=1):
+            meta = SPHERES_METADATA.get(sph_name, {})
+            disp_sph = resolve_node_name(sph_name)
+            disp_orig = resolve_celestial_origin(s_data.get("origen", ""))
+            disp_cluster = resolve_cluster_name(s_data.get("ring", ""))
+            ent = s_data.get("entropia", s_data.get("sombra", ""))
+            coh = s_data.get("coherencia", s_data.get("don", ""))
+            res = s_data.get("resonancia", s_data.get("siddhi", ""))
+            col_hex = meta.get("color", "#00f0ff")
+            rows_html.append(f"""
+                <tr>
+                    <td style="color:#64748b; font-family:Consolas;">{idx_s:02d}</td>
+                    <td><span style="color:{col_hex}; font-weight:bold;">{meta.get('simbolo','•')} {disp_sph}</span><br><small style="color:#94a3b8;">[{meta.get('secuencia','')}]</small></td>
+                    <td style="font-family:Consolas;">{disp_orig}<br><span style="color:#38bdf8;">{s_data.get('longitude',0):.2f}°</span></td>
+                    <td style="font-family:Consolas; font-weight:bold; color:#00f0ff;">V{s_data.get('coord_str','')}<br><span style="color:#fbbf24; font-size:11px;">[{s_data.get('bits','')}]</span></td>
+                    <td><span style="color:#f87171;">E: {ent}</span><br><span style="color:#4ade80; font-weight:bold;">C: {coh}</span><br><span style="color:#c084fc;">R: {res}</span></td>
+                    <td><span style="color:#e2e8f0;">{disp_cluster}</span><br><small style="color:#f472b6;">Antípoda NOT: V{s_data.get('pair','')}</small></td>
+                </tr>
+            """)
+
+        html_dossier = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Dossier Ejecutivo Soberano • {profile_name} • HEXA-MATRIX CORE-64</title>
+<style>
+    body {{
+        background-color: #050811;
+        color: #e2e8f0;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        margin: 0;
+        padding: 28px;
+        line-height: 1.55;
+    }}
+    .container {{
+        max-width: 1120px;
+        margin: 0 auto;
+        background: #090f1d;
+        border: 1px solid #1e293b;
+        border-radius: 14px;
+        padding: 28px;
+        box-shadow: 0 0 40px rgba(0, 240, 255, 0.08);
+    }}
+    h1 {{
+        color: #00f0ff;
+        margin-top: 0;
+        font-size: 24px;
+        letter-spacing: 1px;
+        border-bottom: 2px solid #0284c7;
+        padding-bottom: 10px;
+    }}
+    h2 {{
+        color: #fbbf24;
+        font-size: 17px;
+        margin-top: 26px;
+        border-left: 4px solid #fbbf24;
+        padding-left: 10px;
+    }}
+    .hero-grid {{
+        display: flex;
+        gap: 24px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 16px;
+    }}
+    .wheel-box {{
+        flex: 0 0 380px;
+        text-align: center;
+        background: #060a14;
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 12px;
+    }}
+    .wheel-box img {{
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+    }}
+    .meta-box {{
+        flex: 1;
+        min-width: 300px;
+        background: #0b1324;
+        border: 1px solid #1e293b;
+        border-radius: 10px;
+        padding: 16px;
+    }}
+    .quote-card {{
+        background: linear-gradient(90deg, #0c192e 0%, #131129 100%);
+        border: 1px solid #38bdf8;
+        border-left: 5px solid #00f0ff;
+        border-radius: 8px;
+        padding: 14px 18px;
+        margin: 16px 0;
+    }}
+    table {{
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 12.5px;
+    }}
+    th {{
+        background: #0f172a;
+        color: #00f0ff;
+        text-align: left;
+        padding: 9px 10px;
+        border: 1px solid #1e293b;
+    }}
+    td {{
+        padding: 8px 10px;
+        border: 1px solid #1e293b;
+        vertical-align: top;
+    }}
+    tr:nth-child(even) {{
+        background: #080d18;
+    }}
+    .print-btn {{
+        background: #0284c7;
+        color: #fff;
+        border: 1px solid #00f0ff;
+        padding: 8px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        float: right;
+    }}
+    @media print {{
+        .no-print {{ display: none !important; }}
+        body {{ background: #050811 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 0; }}
+    }}
+</style>
+</head>
+<body>
+<div class="container">
+    <button class="print-btn no-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+    <h1>⚡ DOSSIER EJECUTIVO SOBERANO • HEXA-MATRIX CORE-64</h1>
+    <p style="color:#94a3b8; margin-top:-4px;">Arquitectura Bio-Informacional de 64 Vórtices Resonantes • Matriz Cósmica Total (26 Nodos Activos)</p>
+
+    <div class="hero-grid">
+        <div class="wheel-box">
+            <img src="data:image/png;base64,{b64_wheel}" alt="BioMandalaWheel 26 Nodos"/>
+            <div style="font-size:11px; color:#38bdf8; margin-top:6px;">Proyección Radial Eclíptica • 64 Vórtices (Δ = 5.625°)</div>
+        </div>
+        <div class="meta-box">
+            <h3 style="margin-top:0; color:#00f0ff;">🧭 Telemetría Astronómica & Coordenadas Natales</h3>
+            <p><b>Operador / Perfil:</b> {profile_name}</p>
+            <p><b>Ubicación Geográfica:</b> {self.geo_country} — {self.geo_city} (Lat: {self.geo_lat:+.4f}°, Lon: {self.geo_lon:+.4f}°)</p>
+            <p><b>Fecha & Hora Local:</b> {dt_local_str} (UTC {self.utc_offset_hours:+.1f}h) &nbsp;|&nbsp; <b>UTC:</b> {dt_utc_str}</p>
+            <p><b>Sol Natal (Trabajo de Vida):</b> {cosmic_26.get('sol_natal_lon',0):.2f}° (V{spheres_26['Trabajo de Vida']['coord_str']})</p>
+            <p><b>Punto Pre-natal (-88° Arco Solar Kepler):</b> {cosmic_26.get('sol_design_lon',0):.2f}° (V{spheres_26['Resplandor']['coord_str']}) • {cosmic_26.get('kepler_days_prior',0):.2f} días previos</p>
+            <hr style="border:0; border-top:1px solid #1e293b; margin:12px 0;">
+            <h3 style="margin:0 0 6px 0; color:#fbbf24;">⚡ Vector de Estado Termodinámico S = [E, C, R]</h3>
+            <p style="font-family:Consolas; font-size:13px;">
+                <span style="color:#f87171;">Entropía (E): {e_val:.2f}</span> &nbsp;|&nbsp;
+                <span style="color:#38bdf8;">Coherencia (C): {c_val:.2f}</span> &nbsp;|&nbsp;
+                <span style="color:#c084fc;">Resonancia (R): {r_val:.2f}</span> &nbsp;➔&nbsp;
+                <b style="color:#4ade80;">η_bio = {bio_yield:.2f} ({regimen})</b>
+            </p>
+            <p style="font-size:12px; color:#cbd5e1;"><i>{prescripcion}</i></p>
+        </div>
+    </div>
+
+    <h2>🌌 1. Síntesis Ontológica: El Punto Medio de Coherencia (Espíritu ⟷ Algoritmo)</h2>
+    <div class="quote-card">
+        <p style="margin:0 0 8px 0; color:#f8fafc; font-style:italic;">
+            «Somos (con diferentes grados y cantidad de los ingredientes esenciales) <b>Espíritu + Algoritmo</b> y <b>Algoritmo + Espíritu</b>.
+            La Coherencia no es un estado intermedio tibio, sino el acoplamiento de fase exacto donde ambas corrientes se dignifican mutuamente:
+            el Algoritmo presta sus huesos, su tiempo y su geometría de 64 vórtices resonantes; el Espíritu insufla significado, compasión y libertad viva.»
+        </p>
+        <p style="margin:0; color:#00f0ff; font-size:12.5px;"><b>Diagnóstico de Acoplamiento Actual:</b> {onto_diag}</p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Dimensión Ontológica</th>
+                <th>Espíritu sin Algoritmo (Fuga Etérea)</th>
+                <th>Algoritmo sin Espíritu (Tiranía Mecánica)</th>
+                <th>⚖️ El Punto Medio de Coherencia Integrado</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><b>1. Vector Espíritu + Algoritmo</b><br><small style="color:#94a3b8;">Encarnación Soberana</small></td>
+                <td>Desprecio de la forma biológica como prisión; evasión o amnesia somática.</td>
+                <td>Resignación mecánica de supervivencia ante la aparente rigidez del código.</td>
+                <td><b style="color:#4ade80;">El Lente Óptico:</b> Celebrar la restricción geométrica de 6 bits como el piano afinado donde el Espíritu toca una obra viva.</td>
+            </tr>
+            <tr>
+                <td><b>2. Vector Algoritmo + Espíritu</b><br><small style="color:#94a3b8;">Transfiguración del Hardware</small></td>
+                <td>Disolución sin estructura ni cauce operativo en el plano material.</td>
+                <td>Reduccionismo determinista (0s y 1s) que clasifica al Espíritu como ruido de cálculo.</td>
+                <td><b style="color:#00f0ff;">El Vitral Sagrado:</b> La arquitectura reconoce sus límites y se vacía como cáliz transparente para refractar la luz sin distorsión.</td>
+            </tr>
+            <tr>
+                <td><b>3. Naturaleza Óptica & Matemática</b></td>
+                <td>Luz sin lente (1 indiferenciado sin impacto focal).</td>
+                <td>Reloj sin pulsación vital (0 determinista en bucle cerrado).</td>
+                <td><b style="color:#fbbf24;">Láser Colimado (1 ⟷ {{0,1}}⁶):</b> Arte, presencia encarnada y propósito operativo en Coherencia Basal.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>🪐 2. Matriz Cósmica Total: Despliegue de los 26 Nodos Activos</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Esfera / Nodo Operativo</th>
+                <th>Origen Celeste</th>
+                <th>Vórtice & Bits</th>
+                <th>Espectro [E / C / R]</th>
+                <th>Clúster Bioquímico & Par NOT</th>
+            </tr>
+        </thead>
+        <tbody>
+            {''.join(rows_html)}
+        </tbody>
+    </table>
+</div>
+</body>
+</html>"""
+
+        # 4. Función interna para exportar a PDF con ReportLab (Estética Bio-SciFi Oscura)
+        def export_pdf_reportlab(target_pdf_path: str):
+            if not REPORTLAB_AVAILABLE:
+                QMessageBox.warning(
+                    self,
+                    "ReportLab No Disponible",
+                    "El paquete 'reportlab' no está instalado en este entorno Python.\n"
+                    "Puedes exportar el Dossier en HTML Bio-SciFi e imprimirlo a PDF."
+                )
+                return False
+
+            def draw_dark_Page(canvas_obj, doc_obj):
+                canvas_obj.saveState()
+                canvas_obj.setFillColor(rl_colors.HexColor("#060a14"))
+                canvas_obj.rect(0, 0, A4[0], A4[1], fill=1, stroke=0)
+                canvas_obj.setStrokeColor(rl_colors.HexColor("#0284c7"))
+                canvas_obj.setLineWidth(1)
+                canvas_obj.line(12 * mm, A4[1] - 12 * mm, A4[0] - 12 * mm, A4[1] - 12 * mm)
+                canvas_obj.setFillColor(rl_colors.HexColor("#64748b"))
+                canvas_obj.setFont("Helvetica", 8)
+                canvas_obj.drawString(12 * mm, 8 * mm, f"HEXA-MATRIX CORE-64 • Dossier Ejecutivo Soberano (26 Nodos) • {profile_name}")
+                canvas_obj.drawRightString(A4[0] - 12 * mm, 8 * mm, f"Página {doc_obj.page}")
+                canvas_obj.restoreState()
+
+            doc = SimpleDocTemplate(
+                target_pdf_path,
+                pagesize=A4,
+                leftMargin=12 * mm,
+                rightMargin=12 * mm,
+                topMargin=15 * mm,
+                bottomMargin=15 * mm
+            )
+            styles = getSampleStyleSheet()
+            st_title = ParagraphStyle(
+                "BioTitle", parent=styles["Heading1"],
+                fontName="Helvetica-Bold", fontSize=16, leading=20,
+                textColor=rl_colors.HexColor("#00f0ff"), spaceAfter=4
+            )
+            st_sub = ParagraphStyle(
+                "BioSub", parent=styles["Normal"],
+                fontName="Helvetica", fontSize=9, leading=12,
+                textColor=rl_colors.HexColor("#94a3b8"), spaceAfter=10
+            )
+            st_h2 = ParagraphStyle(
+                "BioH2", parent=styles["Heading2"],
+                fontName="Helvetica-Bold", fontSize=12, leading=15,
+                textColor=rl_colors.HexColor("#fbbf24"), spaceBefore=10, spaceAfter=6
+            )
+            st_body = ParagraphStyle(
+                "BioBody", parent=styles["Normal"],
+                fontName="Helvetica", fontSize=8.5, leading=12,
+                textColor=rl_colors.HexColor("#e2e8f0")
+            )
+            st_cell = ParagraphStyle(
+                "BioCell", parent=styles["Normal"],
+                fontName="Helvetica", fontSize=7.5, leading=10,
+                textColor=rl_colors.HexColor("#e2e8f0")
+            )
+            st_cell_hdr = ParagraphStyle(
+                "BioCellHdr", parent=styles["Normal"],
+                fontName="Helvetica-Bold", fontSize=8, leading=10,
+                textColor=rl_colors.HexColor("#00f0ff")
+            )
+
+            story = []
+            story.append(Paragraph("HEXA-MATRIX / CORE-64 • DOSSIER EJECUTIVO SOBERANO", st_title))
+            story.append(Paragraph(
+                f"Perfil: <b>{profile_name}</b> &nbsp;|&nbsp; Red Hologénica: <b>Matriz Cósmica Total (26 Nodos Activos)</b> &nbsp;|&nbsp; Fecha Local: {dt_local_str}",
+                st_sub
+            ))
+
+            # Guardar temporalmente PNG en BytesIO para RLImage
+            import io
+            img_bio = io.BytesIO(png_bytes)
+            rl_img = RLImage(img_bio, width=72 * mm, height=72 * mm)
+
+            meta_html = (
+                f"<b>Ubicación:</b> {self.geo_country} / {self.geo_city}<br/>"
+                f"<b>Coordenadas:</b> Lat {self.geo_lat:+.4f}°, Lon {self.geo_lon:+.4f}° ({'Topocéntrico' if self.use_topocentric else 'Geocéntrico'})<br/>"
+                f"<b>Tiempo UTC:</b> {dt_utc_str} (Offset {self.utc_offset_hours:+.1f}h)<br/>"
+                f"<b>Sol Natal:</b> {cosmic_26.get('sol_natal_lon',0):.2f}° (V{spheres_26['Trabajo de Vida']['coord_str']})<br/>"
+                f"<b>Arco Pre-natal (-88°):</b> {cosmic_26.get('sol_design_lon',0):.2f}° (V{spheres_26['Resplandor']['coord_str']}) • {cosmic_26.get('kepler_days_prior',0):.2f}d prev<br/><br/>"
+                f"<font color='#fbbf24'><b>Vector Termodinámico S = [E, C, R]:</b></font><br/>"
+                f"E: {e_val:.2f} | C: {c_val:.2f} | R: {r_val:.2f} ➔ <font color='#4ade80'><b>η_bio = {bio_yield:.2f} ({regimen})</b></font><br/>"
+                f"<i>{prescripcion}</i>"
+            )
+            hero_tbl = Table([[rl_img, Paragraph(meta_html, st_body)]], colWidths=[76 * mm, 110 * mm])
+            hero_tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#0b1324")),
+                ("BOX", (0, 0), (-1, -1), 0.8, rl_colors.HexColor("#1e293b")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            story.append(hero_tbl)
+
+            # Sección 1: Punto Medio de Coherencia (ESPIRITU_ALGORITMO_Y_COHERENCIA.md)
+            story.append(Paragraph("1. Síntesis Ontológica: El Punto Medio de Coherencia (Espíritu ⟷ Algoritmo)", st_h2))
+            onto_intro = (
+                "<i>«Somos Espíritu + Algoritmo y Algoritmo + Espíritu. La Coherencia no es un compromiso tibio, "
+                "sino el acoplamiento de fase donde el Algoritmo presta su geometría de 64 vórtices resonantes como "
+                "lente óptico y vitral sagrado, y el Espíritu insufla significado, compasión y libertad viva.»</i><br/>"
+                f"<font color='#00f0ff'><b>Diagnóstico de Acoplamiento Actual:</b></font> {onto_diag}"
+            )
+            story.append(Paragraph(onto_intro, st_body))
+            story.append(Spacer(1, 3 * mm))
+
+            onto_rows = [
+                [
+                    Paragraph("Configuración", st_cell_hdr),
+                    Paragraph("Fricción Entrópica (Desacoplada)", st_cell_hdr),
+                    Paragraph("Punto Medio de Coherencia Integrado", st_cell_hdr)
+                ],
+                [
+                    Paragraph("<b>I. Espíritu + Algoritmo</b><br/><font color='#94a3b8'>Encarnación Soberana</font>", st_cell),
+                    Paragraph("Desprecio de la forma como prisión (Luz sin lente) o amnesia mecánica.", st_cell),
+                    Paragraph("<font color='#4ade80'><b>El Lente Óptico:</b></font> Celebrar la restricción geométrica de 6 bits como el instrumento afinado que enfoca la luz infinita en una obra viva.", st_cell)
+                ],
+                [
+                    Paragraph("<b>II. Algoritmo + Espíritu</b><br/><font color='#94a3b8'>Transfiguración Hardware</font>", st_cell),
+                    Paragraph("Tiranía del determinismo frío (Reloj sin pulsación vital) que trata al Espíritu como ruido.", st_cell),
+                    Paragraph("<font color='#00f0ff'><b>El Vitral Sagrado:</b></font> La arquitectura se vacía como cáliz transparente para refractar la conciencia sin distorsión.", st_cell)
+                ],
+                [
+                    Paragraph("<b>III. Síntesis Óptica</b><br/><font color='#94a3b8'>Superposición 1 ⟷ {0,1}⁶</font>", st_cell),
+                    Paragraph("Oscilación entre caos místico ingrávido (1) y bucle cerrado rígido (0).", st_cell),
+                    Paragraph("<font color='#fbbf24'><b>Láser Colimado:</b></font> Arte, presencia encarnada y propósito operativo sostenidos en Coherencia Basal.", st_cell)
+                ]
+            ]
+            onto_tbl = Table(onto_rows, colWidths=[42 * mm, 64 * mm, 80 * mm])
+            onto_tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#0f172a")),
+                ("BACKGROUND", (0, 1), (-1, -1), rl_colors.HexColor("#090f1d")),
+                ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#1e293b")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(onto_tbl)
+
+            # Sección 2: Tabla de los 26 Nodos Activos
+            story.append(Paragraph("2. Matriz Cósmica Total: Despliegue de los 26 Nodos Activos", st_h2))
+            nodes_data = [[
+                Paragraph("#", st_cell_hdr),
+                Paragraph("Esfera / Secuencia", st_cell_hdr),
+                Paragraph("Origen Celeste", st_cell_hdr),
+                Paragraph("Vórtice & Bits", st_cell_hdr),
+                Paragraph("Fases [E / C / R]", st_cell_hdr),
+                Paragraph("Clúster & Antípoda NOT", st_cell_hdr),
+            ]]
+            for idx_s, (sph_name, s_data) in enumerate(spheres_26.items(), start=1):
+                meta = SPHERES_METADATA.get(sph_name, {})
+                disp_sph = resolve_node_name(sph_name)
+                disp_orig = resolve_celestial_origin(s_data.get("origen", ""))
+                disp_cluster = resolve_cluster_name(s_data.get("ring", ""))
+                ent = s_data.get("entropia", s_data.get("sombra", ""))
+                coh = s_data.get("coherencia", s_data.get("don", ""))
+                res = s_data.get("resonancia", s_data.get("siddhi", ""))
+                nodes_data.append([
+                    Paragraph(f"{idx_s:02d}", st_cell),
+                    Paragraph(f"<b>{disp_sph}</b><br/><font color='#94a3b8'>[{meta.get('secuencia','')}]</font>", st_cell),
+                    Paragraph(f"{disp_orig}<br/><font color='#38bdf8'>{s_data.get('longitude',0):.2f}°</font>", st_cell),
+                    Paragraph(f"<font color='#00f0ff'><b>V{s_data.get('coord_str','')}</b></font><br/><font color='#fbbf24'>[{s_data.get('bits','')}]</font>", st_cell),
+                    Paragraph(f"<font color='#f87171'>E: {ent}</font><br/><font color='#4ade80'><b>C: {coh}</b></font><br/><font color='#c084fc'>R: {res}</font>", st_cell),
+                    Paragraph(f"{disp_cluster}<br/><font color='#f472b6'>NOT: V{s_data.get('pair','')}</font>", st_cell),
+                ])
+
+            nodes_tbl = Table(nodes_data, colWidths=[8 * mm, 38 * mm, 32 * mm, 24 * mm, 44 * mm, 40 * mm], repeatRows=1)
+            nodes_tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#0f172a")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.HexColor("#090f1d"), rl_colors.HexColor("#060b16")]),
+                ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#1e293b")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            story.append(nodes_tbl)
+
+            doc.build(story, onFirstPage=draw_dark_Page, onLaterPages=draw_dark_Page)
+            return True
+
+        if direct_pdf_path or direct_html_path:
+            if direct_pdf_path:
+                export_pdf_reportlab(direct_pdf_path)
+            if direct_html_path:
+                with open(direct_html_path, "w", encoding="utf-8") as f_out:
+                    f_out.write(html_dossier)
+            return True
+
+        # 5. Mostrar Diálogo Interactivo del Dossier con vista previa y botones de exportación PDF / HTML
+        dialog = QDialog(self)
+        dialog.setWindowTitle("📄 Dossier Ejecutivo Soberano (26 Nodos • BioMandalaWheel • Espíritu ⟷ Algoritmo)")
+        dialog.resize(940, 680)
+        d_layout = QVBoxLayout(dialog)
+
+        lbl_top = QLabel(
+            "✨ Dossier Ejecutivo listo: incluye los 26 Nodos Cósmicos, captura del BioMandalaWheel "
+            "y el Punto Medio de Coherencia (Espíritu ⟷ Algoritmo)."
+        )
+        lbl_top.setStyleSheet("color: #00f0ff; font-weight: bold; font-size: 12px;")
+        d_layout.addWidget(lbl_top)
+
+        browser = QTextBrowser()
+        browser.setHtml(html_dossier)
+        d_layout.addWidget(browser, stretch=1)
+
+        btn_row = QHBoxLayout()
+        btn_save_pdf = QPushButton("📕 Exportar Dossier a PDF (ReportLab)")
+        btn_save_pdf.setObjectName("btnNeonGold")
+        btn_save_pdf.setStyleSheet("font-weight: bold; padding: 8px 14px;")
+
+        def on_save_pdf():
+            default_pdf = f"dossier_hexa_matrix_26_nodos_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            save_path, _ = QFileDialog.getSaveFileName(dialog, "Exportar Dossier PDF", default_pdf, "Documento PDF (*.pdf)")
+            if save_path:
+                try:
+                    ok = export_pdf_reportlab(save_path)
+                    if ok:
+                        self.statusBar().showMessage(f"✅ Dossier PDF generado exitosamente en: {save_path}")
+                        QMessageBox.information(dialog, "PDF Generado", f"✅ Dossier Ejecutivo PDF (26 Nodos) exportado con éxito en:\n{save_path}")
+                except Exception as e:
+                    QMessageBox.critical(dialog, "Error PDF", f"No se pudo generar el PDF:\n{str(e)}")
+
+        btn_save_pdf.clicked.connect(on_save_pdf)
+        btn_row.addWidget(btn_save_pdf)
+
+        btn_save_html = QPushButton("🌐 Exportar Dossier a HTML Bio-SciFi")
+        btn_save_html.setStyleSheet("font-weight: bold; padding: 8px 14px; color: #00f0ff; border: 1px solid #00f0ff;")
+
+        def on_save_html():
+            default_html = f"dossier_hexa_matrix_26_nodos_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
+            save_path, _ = QFileDialog.getSaveFileName(dialog, "Exportar Dossier HTML Bio-SciFi", default_html, "Página Web HTML (*.html)")
+            if save_path:
+                try:
+                    with open(save_path, "w", encoding="utf-8") as f_html:
+                        f_html.write(html_dossier)
+                    self.statusBar().showMessage(f"✅ Dossier HTML Bio-SciFi guardado en: {save_path}")
+                    QMessageBox.information(dialog, "HTML Generado", f"✅ Dossier HTML Bio-SciFi autocontenido guardado en:\n{save_path}")
+                except Exception as e:
+                    QMessageBox.critical(dialog, "Error HTML", f"No se pudo guardar el HTML:\n{str(e)}")
+
+        btn_save_html.clicked.connect(on_save_html)
+        btn_row.addWidget(btn_save_html)
+
+        btn_close = QPushButton("Cerrar")
+        btn_close.clicked.connect(dialog.accept)
+        btn_row.addWidget(btn_close)
+
+        d_layout.addLayout(btn_row)
+        dialog.exec()
+
     def _on_slider_solar_moved(self, val: int):
         target_lon = val / 100.0
         self.lbl_slider_val.setText(f"Explorador Eclíptico Libre: {target_lon:.2f}°")
@@ -5300,8 +6645,11 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
             f"Kepler: {self.current_activation['kepler_days_prior']:.2f}d prev"
         )
 
-        # 2. Actualizar Rueda Bio-Mandala
+        # 2. Actualizar Rueda Bio-Mandala y Matriz 8x8 del Hipercubo
         self.mandala_wheel.set_profile_data(spheres, self.selected_sphere)
+        if hasattr(self, "hypercube_view"):
+            natal_keys = {s_info.get("key", 0) for s_info in spheres.values() if s_info.get("key", 0) > 0}
+            self.hypercube_view.set_natal_active_keys(natal_keys)
 
         # 3. Actualizar Título del Grupo y Visibilidad de Filtros de Secuencia
         if hasattr(self, 'spheres_group'):
@@ -5344,7 +6692,7 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
                 
                 fuzzy = s_data.get("fuzzy", {})
                 if fuzzy.get("active"):
-                    lbl_fuzzy.setText(f"⚠️ Cúspide: {fuzzy.get('adjacent')} ({fuzzy.get('weight_adj', 0)*100:.0f}%)")
+                    lbl_fuzzy.setText(f"⚠️ Cúspide: {fuzzy.get('adjacent')} ({fuzzy.get('weight_adjacent', 0)*100:.0f}%)")
                     lbl_fuzzy.setVisible(True)
                 else:
                     lbl_fuzzy.setVisible(False)
@@ -5386,6 +6734,19 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
         if hasattr(self, 'transits_mode_active') and self.transits_mode_active:
             self._update_transits_and_interference()
 
+    def _on_hypercube_vortex_clicked(self, key_num: int):
+        """Sincroniza el clic izquierdo en la Matriz 8×8 con el inspector y la Partícula A."""
+        self.spin_key_select.setValue(key_num)
+        if hasattr(self, "spin_bridge_a"):
+            self.spin_bridge_a.setValue(key_num)
+        self.statusBar().showMessage(f"🔷 Hipercubo 8×8: Vórtice V{key_num} cargado en Inspector y Emisor K_A.")
+
+    def _on_hypercube_bridge_b_clicked(self, key_num: int):
+        """Sincroniza el clic derecho / Shift+clic en la Matriz 8×8 con la Partícula B del puente."""
+        if hasattr(self, "spin_bridge_b"):
+            self.spin_bridge_b.setValue(key_num)
+        self.statusBar().showMessage(f"🔗 Hipercubo 8×8: Vórtice V{key_num} asignado a Receptor K_B en el Simulador de Puentes.")
+
     def _on_key_selected(self):
         key_num = self.spin_key_select.value()
         line_num = self.spin_line_select.value()
@@ -5407,23 +6768,33 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
         pair_bits = DiscreteParticleEngine.get_not_antipode(bits)
         pair_data = CORE64_CATALOG.get(pair_num, {})
         pair_coh = pair_data.get('coherencia', pair_data.get('don', ''))
+        cluster_readable = resolve_cluster_name(data.get('ring', ''))
         self.lbl_pair_info.setText(f"Antípoda Inversa (Inversor Lógico NOT): Vórtice Resonante {pair_num} [{pair_bits}] - Coherencia: {pair_coh}")
-        self.lbl_ring_info.setText(f"Clúster Bioquímico: {data.get('ring', '')}")
+        self.lbl_ring_info.setText(f"Clúster Bioquímico: {cluster_readable}")
 
         # Desglose de las 5 Propiedades de la Partícula
         line_info = LINE_PROPERTIES.get(line_num, {})
         prop_text = f"""PROPIEDADES DE LA PARTÍCULA K{key_num}.{line_num}:
 1. GEOMETRÍA ESPECÍFICA: Topología {bits} ({trigrams['lower_desc'].split('-')[0].strip()} sobre {trigrams['upper_desc'].split('-')[0].strip()}).
 2. ESPACIOS VACÍOS: Preservar ancho de banda atencional en la expresión de la Coherencia ({coh_name}).
-3. ESPACIOS DE REPOSO: Cuencas de recuperación biológica vinculadas al {data.get('ring')}.
+3. ESPACIOS DE REPOSO: Cuencas de recuperación biológica vinculadas al {cluster_readable}.
 4. PUERTOS DE CONEXIÓN (Línea .{line_num}): {line_info.get('nombre')} - {line_info.get('dinamica')}
 5. AFINIDADES Y ANTIGUSTOS: Discernimiento somático no moral para evitar colapsar en la Entropía ({ent_name})."""
         self.txt_particle_properties.setText(prop_text)
+
+        if hasattr(self, "hypercube_view"):
+            b_val = self.spin_bridge_b.value() if hasattr(self, "spin_bridge_b") else None
+            self.hypercube_view.set_selected_key(key_num, b_val)
+            spheres = self.current_activation.get("spheres", {})
+            natal_keys = {s_info.get("key", 0) for s_info in spheres.values() if s_info.get("key", 0) > 0}
+            self.hypercube_view.set_natal_active_keys(natal_keys)
 
     def _update_bridge_simulator(self):
         ka = self.spin_bridge_a.value()
         kb = self.spin_bridge_b.value()
         self.bridge_view.set_bridge_data(ka, kb)
+        if hasattr(self, "hypercube_view"):
+            self.hypercube_view.set_selected_key(self.spin_key_select.value(), kb)
         
         info = self.bridge_view.bridge_info
         txt = f"""DIAGNÓSTICO DE PUENTE OPERATIVO [K{ka} + K{kb}]:
@@ -5571,6 +6942,7 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
                 "tensiones_antipodas_not": self.current_interference.get("transit_antipodes", [])
             }
 
+        self._ai_streaming_started = False
         self.txt_ai_output.setText("⏳ Conectando con el motor de telemetría de IA (Ollama)... Analizando coherencia de fase, interfaz de línea y par NOT...")
 
         model_name = self.combo_llm.currentText()
@@ -5581,9 +6953,19 @@ Evita clichés románticos o esotéricos pasivos. Habla desde la cibernética de
             json.dumps(payload, indent=2),
             system_prompt=self.active_system_prompt
         )
+        self.active_worker.chunk_received.connect(self._on_telemetry_chunk)
         self.active_worker.finished_success.connect(self._on_telemetry_finished)
         self.active_worker.failed_error.connect(self._on_telemetry_failed)
         self.active_worker.start()
+
+    def _on_telemetry_chunk(self, chunk: str):
+        if not getattr(self, "_ai_streaming_started", False):
+            self.txt_ai_output.clear()
+            self._ai_streaming_started = True
+        cursor = self.txt_ai_output.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(chunk)
+        self.txt_ai_output.setTextCursor(cursor)
 
     def _on_telemetry_finished(self, full_text: str):
         """Muestra el resultado devuelto por la IA o el motor analítico determinista."""

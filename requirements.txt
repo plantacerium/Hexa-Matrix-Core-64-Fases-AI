@@ -1,0 +1,18 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# HEXA-MATRIX CORE-64 • DEPENDENCIAS DEL PROYECTO
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Interfaz Gráfica (GUI) Bio-SciFi & Motor de Renderizado ──
+PySide6>=6.5.0
+
+# ── Cálculo Numérico, Vectores y Proyecciones ──
+numpy>=1.24.0
+
+# ── Servidor Model Context Protocol (MCP) para Agentes de IA ──
+mcp>=1.3.0
+
+# ── Generador y Exportador de Dossiers Ejecutivos en PDF ──
+reportlab>=4.0.0
+
+# ── Telemetría Local con LLMs y Embeddings Semánticos (Opcional / Recomendado) ──
+ollama>=0.4.0

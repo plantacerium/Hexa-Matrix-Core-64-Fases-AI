@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "hexamatrix-core-64": {
+      "command": "python",
+      "args": [
+        "hexamatrix_mcp_server.py"
+      ],
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

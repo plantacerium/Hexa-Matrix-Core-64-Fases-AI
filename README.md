@@ -40,7 +40,7 @@ El sistema opera con el diccionario de desacoplamiento formal cargado dinámicam
 | **Clúster Bioquímico de Co-Regulación** | Familias funcionales de resonancia y acoplamiento químico armónico. |
 | **Capas de Interfaz / Puertos Nodal-Red** | Niveles de acoplamiento desde el sustrato basal (.1) hasta la cúpula (.6). |
 | **Circuito Base (11 Nodos)** | Trayectoria de Activación Primaria, Relacional y Material básica. |
-| **Matriz Cósmica Total (26 Nodos Activos)** | Topología completa con Quirón, Urano, Neptuno, Plutón y Nodos Lunares natales y de diseño. |
+| **Matriz Cósmica Total (26 Nodos Activos)** | Topología completa con Luna, Mercurio, Saturno, Urano, Neptuno, Plutón y Nodos Lunares natales y de diseño. |
 
 ---
 
@@ -99,6 +99,61 @@ $$\text{Rendimiento} = \frac{C \cdot R}{E + \epsilon} \quad (\epsilon = 0.05)$$
 
 ---
 
+## 🔌 Servidor MCP (Model Context Protocol) para Agentes de IA
+
+**HEXA-MATRIX CORE-64** incorpora un servidor nativo de **Model Context Protocol (MCP)** en [`hexamatrix_mcp_server.py`](hexamatrix_mcp_server.py). Permite a asistentes y agentes de IA (Google Antigravity, Claude Desktop, Cursor, etc.) invocar todas las capacidades del motor de forma determinista y estandarizada sin depender de la interfaz gráfica.
+
+### 🛠️ Herramientas Expuestas (13 Tools):
+- `calculate_hologenetic_profile`: Cálculo de la Matriz Natal y Prenatal (88° solar arc via Newton-Raphson, paralaje lunar topocéntrico y modo de hasta 26 nodos).
+- `calculate_thermodynamic_yield`: Evaluación de la ecuación de estado $Y = \frac{C \cdot R}{E + \epsilon}$ con prescripción somática.
+- `get_vortex_info`: Morfología de 6 bits, trigramas somático/ambiental, antípoda NOT (DH=6), clúster de aminoácidos y 6 vecinos a DH=1.
+- `search_vortices`: Búsqueda flexible en el catálogo CORE-64 por sombra, don, siddhi, clúster o trigrama.
+- `analyze_vortex_bridge`: Diagnóstico de enlaces (Serie, Paralelo, Antípoda NOT, Clúster) y canales canónicos cerrados.
+- `analyze_network_synastry`: Acoplamiento bio-electromagnético entre dos sujetos, canales cerrados y resonancia $\eta_{\text{red}}$.
+- `get_planetary_transits`: Posiciones planetarias en tiempo real con time-scrubbing horario ($\pm \Delta t$).
+- `evaluate_transit_interference`: Canales activados y disparadores antípodas entre tránsitos y carta natal.
+- `get_hypercube_topology`: Topología booleana 6D completa ($2^6 = 64$) con distribución por distancia de Hamming (DH=0 a 6).
+- `list_vault_profiles` / `save_vault_profile` / `delete_vault_profile`: Gestión de la bóveda local (`profiles_vault.json`).
+- `export_dossier_html`: Generación de dossier ejecutivo en HTML Bio-SciFi con la síntesis de *Espíritu, Algoritmo y Coherencia*.
+
+### 📚 Recursos (Resources) y Plantillas (Prompts):
+- `hexamatrix://vortices/catalog`: Catálogo completo de los 64 vórtices en JSON.
+- `hexamatrix://channels/canonical`: Los 36 canales electromagnéticos de acoplamiento.
+- `hexamatrix://vault/profiles`: Bóveda de perfiles natales persistidos.
+- `hexamatrix://theory/manifesto`: Manifiesto epistemológico y ontológico del proyecto.
+- Prompts preconfigurados para lecturas hologénicas, sinastría relacional y calibración termodinámica.
+
+### ⚙️ Configuración del Servidor MCP:
+
+#### En Antigravity (`~/.gemini/config/mcp_config.json`):
+```json
+{
+  "mcpServers": {
+    "hexamatrix-core-64": {
+      "command": "python",
+      "args": ["g:/GitHub/Hexa-Matrix-Core-64-Fases-AI-main-GitHub/Hexa-Matrix-Core-64-Fases-AI-main/hexamatrix_mcp_server.py"],
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
+```
+
+#### En Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "hexamatrix": {
+      "command": "python",
+      "args": ["g:\\GitHub\\Hexa-Matrix-Core-64-Fases-AI-main-GitHub\\Hexa-Matrix-Core-64-Fases-AI-main\\hexamatrix_mcp_server.py"]
+    }
+  }
+}
+```
+
+---
+
 ## 🚀 Instalación y Puesta en Marcha
 
 ### Requisitos Previos
@@ -107,9 +162,7 @@ $$\text{Rendimiento} = \frac{C \cdot R}{E + \epsilon} \quad (\epsilon = 0.05)$$
 
 ### Instalación de Dependencias
 ```bash
-pip install PySide6 numpy
-# Opcional para IA local:
-pip install ollama
+pip install -r requirements.txt
 ```
 
 ### Modelos Locales Recomendados para Ollama

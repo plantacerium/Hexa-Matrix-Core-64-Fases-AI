@@ -15,6 +15,9 @@ Expone:
   • Ecuación de estado termodinámico no-lineal (Rendimiento Biológico).
   • Sinastría bio-electromagnética de red y cierre de canales armónicos.
   • Telemetría de tránsitos planetarios en tiempo real e interferencia.
+  • Escaneo predictivo de ventanas temporales de tránsitos.
+  • Sinastría de grupo / topología colectiva (Penta / Equipos multicuerpo).
+  • Puente biomolecular de codones de ARN y aminoácidos estándar IUPAC.
   • Bóveda persistente de perfiles natales (profiles_vault.json).
   • Generación y exportación de Dossiers Ejecutivos Bio-SciFi (HTML y PDF).
 ══════════════════════════════════════════════════════════════════════════════
@@ -24,20 +27,35 @@ import sys
 import os
 import json
 import base64
+import html
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
-# Asegurar que el directorio de este script esté en sys.path
+# ── Fix A: Protección estricta del canal stdio para protocolo JSON-RPC ──
+# Evitar que PySide6 intente abrir contexto gráfico y capturar prints al importar
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-# Importar el núcleo matemático y de datos de HexaMatrix
+_orig_stdout = sys.stdout
 try:
+    sys.stdout = sys.stderr
     import hexa_matrix_core_64_fases_ai as hm
-except ImportError as e:
-    sys.stderr.write(f"Error importando hexa_matrix_core_64_fases_ai: {e}\n")
-    raise
+finally:
+    sys.stdout = _orig_stdout
+
+# Importar ReportLab para generación nativa de PDF
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 # Importar el SDK de Model Context Protocol (soporte mcp 2.x y 1.x)
 try:
@@ -54,15 +72,57 @@ mcp = MCPServer("hexamatrix-core-64")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DICCIONARIO BIOMOLECULAR: AMINOÁCIDOS IUPAC Y CODONES DE ARN
+# ══════════════════════════════════════════════════════════════════════════════
+
+AMINO_ACID_MAP = {
+    "cluster_triptofano": {"name_es": "Triptófano", "name_en": "Tryptophan", "iupac_3": "Trp", "iupac_1": "W", "codons": ["UGG"], "chem_class": "Aromático no polar"},
+    "cluster_metionina": {"name_es": "Metionina", "name_en": "Methionine", "iupac_3": "Met", "iupac_1": "M", "codons": ["AUG"], "chem_class": "No polar alifático azufrado"},
+    "cluster_start": {"name_es": "Codón Start (Metionina)", "name_en": "Start Codon (Met)", "iupac_3": "Met", "iupac_1": "M", "codons": ["AUG"], "chem_class": "Iniciador transcripcional"},
+    "cluster_stop": {"name_es": "Codones Stop (Terminación)", "name_en": "Stop Codons", "iupac_3": "STOP", "iupac_1": "*", "codons": ["UAA", "UAG", "UGA"], "chem_class": "Terminación de cadena peptídica"},
+    "cluster_tirosina": {"name_es": "Tirosina", "name_en": "Tyrosine", "iupac_3": "Tyr", "iupac_1": "Y", "codons": ["UAU", "UAC"], "chem_class": "Aromático polar neutro"},
+    "cluster_histidina": {"name_es": "Histidina", "name_en": "Histidine", "iupac_3": "His", "iupac_1": "H", "codons": ["CAU", "CAC"], "chem_class": "Básico aromático con carga positiva"},
+    "cluster_glutamina": {"name_es": "Glutamina", "name_en": "Glutamine", "iupac_3": "Gln", "iupac_1": "Q", "codons": ["CAA", "CAG"], "chem_class": "Polar sin carga (amida)"},
+    "cluster_aspartico": {"name_es": "Ácido Aspártico", "name_en": "Aspartic Acid", "iupac_3": "Asp", "iupac_1": "D", "codons": ["GAU", "GAC"], "chem_class": "Ácido con carga negativa"},
+    "cluster_asparagina": {"name_es": "Asparagina", "name_en": "Asparagine", "iupac_3": "Asn", "iupac_1": "N", "codons": ["AAU", "AAC"], "chem_class": "Polar sin carga (amida)"},
+    "cluster_glutamico": {"name_es": "Ácido Glutámico", "name_en": "Glutamic Acid", "iupac_3": "Glu", "iupac_1": "E", "codons": ["GAA", "GAG"], "chem_class": "Ácido con carga negativa"},
+    "cluster_fenilalanina": {"name_es": "Fenilalanina", "name_en": "Phenylalanine", "iupac_3": "Phe", "iupac_1": "F", "codons": ["UUU", "UUC"], "chem_class": "Aromático hidrofóbico no polar"},
+    "cluster_valina": {"name_es": "Valina", "name_en": "Valine", "iupac_3": "Val", "iupac_1": "V", "codons": ["GUU", "GUC", "GUA", "GUG"], "chem_class": "Alifático no polar ramificado"},
+    "cluster_isoleucina": {"name_es": "Isoleucina", "name_en": "Isoleucine", "iupac_3": "Ile", "iupac_1": "I", "codons": ["AUU", "AUC", "AUA"], "chem_class": "Alifático no polar ramificado"},
+    "cluster_leucina": {"name_es": "Leucina", "name_en": "Leucine", "iupac_3": "Leu", "iupac_1": "L", "codons": ["UUA", "UUG", "CUU", "CUC", "CUA", "CUG"], "chem_class": "Alifático no polar ramificado"},
+    "cluster_prolina": {"name_es": "Prolina", "name_en": "Proline", "iupac_3": "Pro", "iupac_1": "P", "codons": ["CCU", "CCC", "CCA", "CCG"], "chem_class": "Iminoácido cíclico rígido"},
+    "cluster_treonina": {"name_es": "Treonina", "name_en": "Threonine", "iupac_3": "Thr", "iupac_1": "T", "codons": ["ACU", "ACC", "ACA", "ACG"], "chem_class": "Polar neutro hidroxilado"},
+    "cluster_serina": {"name_es": "Serina", "name_en": "Serine", "iupac_3": "Ser", "iupac_1": "S", "codons": ["UCU", "UCC", "UCA", "UCG", "AGU", "AGC"], "chem_class": "Polar neutro hidroxilado"},
+    "cluster_glicina": {"name_es": "Glicina", "name_en": "Glycine", "iupac_3": "Gly", "iupac_1": "G", "codons": ["GGU", "GGC", "GGA", "GGG"], "chem_class": "Alifático flexible no quiral"},
+    "cluster_alanina_a": {"name_es": "Alanina (Materia / Estructura)", "name_en": "Alanine A", "iupac_3": "Ala", "iupac_1": "A", "codons": ["GCU", "GCC"], "chem_class": "Alifático pequeño no polar"},
+    "cluster_alanina_b": {"name_es": "Alanina (Polaridad / Forma)", "name_en": "Alanine B", "iupac_3": "Ala", "iupac_1": "A", "codons": ["GCA", "GCG"], "chem_class": "Alifático pequeño no polar"},
+    "cluster_arginina": {"name_es": "Arginina", "name_en": "Arginine", "iupac_3": "Arg", "iupac_1": "R", "codons": ["CGU", "CGC", "CGA", "CGG", "AGA", "AGG"], "chem_class": "Básico básico con carga positiva"},
+    "cluster_cistina": {"name_es": "Cisteína / Cistina", "name_en": "Cysteine", "iupac_3": "Cys", "iupac_1": "C", "codons": ["UGU", "UGC"], "chem_class": "Polar azufrado (puentes disulfuro)"},
+    "cluster_lisina": {"name_es": "Lisina", "name_en": "Lysine", "iupac_3": "Lys", "iupac_1": "K", "codons": ["AAA", "AAG"], "chem_class": "Básico con carga positiva"},
+    "cluster_choque": {"name_es": "Codones de Choque (Revolución)", "name_en": "Shock Codons", "iupac_3": "Shk", "iupac_1": "!", "codons": ["UGA", "CUG"], "chem_class": "Polaridad de mutación rápida"},
+    "cluster_sinonimo": {"name_es": "Codón Sinónimo (Sinarquía)", "name_en": "Synonymous Codon", "iupac_3": "Syn", "iupac_1": "=", "codons": ["GUG", "UUG"], "chem_class": "Modulación de traducción peptídica"}
+}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # UTILIDADES DE PARSEO Y FORMATEO
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _parse_datetime(dt_str: str) -> datetime:
-    """Parsea cadenas de fecha y hora en diversos formatos comunes."""
+    """
+    Parsea cadenas de fecha y hora en diversos formatos comunes.
+    Fix C: Maneja con precisión tanto objetos naive como aware con timezone offset.
+    """
     dt_str = dt_str.strip()
     if dt_str.endswith("Z"):
-        dt_str = dt_str[:-1]
+        dt_str = dt_str[:-1] + "+00:00"
     
+    # Intentar primero fromisoformat (soporta +02:00, -03:00, etc.)
+    try:
+        return datetime.fromisoformat(dt_str)
+    except Exception:
+        pass
+
     formats = [
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",
@@ -75,10 +135,23 @@ def _parse_datetime(dt_str: str) -> datetime:
             return datetime.strptime(dt_str, fmt)
         except ValueError:
             continue
-    try:
-        return datetime.fromisoformat(dt_str)
-    except Exception as e:
-        raise ValueError(f"Formato de fecha inválido '{dt_str}'. Use 'YYYY-MM-DD HH:MM:SS' o ISO-8601: {e}")
+    raise ValueError(f"Formato de fecha inválido '{dt_str}'. Use 'YYYY-MM-DD HH:MM:SS' o ISO-8601.")
+
+
+def _resolve_natal_and_utc_datetimes(birth_datetime: str, utc_offset_hours: float) -> Tuple[datetime, datetime]:
+    """
+    Resuelve deterministamente el datetime local y el datetime UTC sin dobles offsets.
+    """
+    dt = _parse_datetime(birth_datetime)
+    if dt.tzinfo is not None:
+        # Cadena aware: usar su propio timezone offset
+        dt_utc = dt.astimezone(timezone.utc)
+        dt_local = dt.replace(tzinfo=None)
+    else:
+        # Cadena naive: aplicar utc_offset_hours
+        dt_local = dt
+        dt_utc = (dt_local - timedelta(hours=utc_offset_hours)).replace(tzinfo=timezone.utc)
+    return dt_local, dt_utc
 
 
 def _enrich_sphere(sphere_name: str, s_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -136,7 +209,6 @@ def get_vortex_info(vortex_id: int) -> Dict[str, Any]:
     pair_id = k_data.get("pair", 0)
     pair_bits = hm.CORE64_CATALOG.get(pair_id, {}).get("bits", "")
     
-    # Calcular los 6 vecinos a distancia de Hamming DH = 1
     dh1_neighbors = []
     for other_id, other_data in hm.CORE64_CATALOG.items():
         if other_id == vortex_id:
@@ -149,6 +221,9 @@ def get_vortex_info(vortex_id: int) -> Dict[str, Any]:
                 "coherence": other_data.get("coherencia", ""),
                 "resonance": other_data.get("resonancia", "")
             })
+    
+    ring_key = k_data.get("ring", "")
+    bio_info = AMINO_ACID_MAP.get(ring_key, {})
     
     return {
         "vortex_id": vortex_id,
@@ -172,8 +247,10 @@ def get_vortex_info(vortex_id: int) -> Dict[str, Any]:
             "hamming_distance": 6
         },
         "cluster": {
-            "code": k_data.get("ring", ""),
-            "name": hm.resolve_cluster_name(k_data.get("ring", ""))
+            "code": ring_key,
+            "name": hm.resolve_cluster_name(ring_key),
+            "amino_acid": bio_info.get("name_es", ""),
+            "iupac_3": bio_info.get("iupac_3", "")
         },
         "ontological_frequencies": {
             "entropy": k_data.get("entropia", ""),
@@ -260,19 +337,8 @@ def calculate_hologenetic_profile(
     Ejecuta el solver Newton-Raphson para resolver el instante exacto del arco solar prenatal de 88°,
     aplica corrección de paralaje lunar topocéntrico a la Esfera de la Atracción y proyecta las
     posiciones planetarias sobre la rueda de 64 vórtices y 6 líneas.
-    
-    Args:
-        birth_datetime: Fecha y hora local de nacimiento (ej. '1990-05-21 14:30:00' o ISO-8601).
-        utc_offset_hours: Huso horario local con respecto a UTC (ej. 2.0 para España CEST, -3.0 para Argentina).
-        latitude: Latitud geográfica en grados decimales (por defecto Madrid: 40.4168).
-        longitude: Longitud geográfica en grados decimales (por defecto Madrid: -3.7038).
-        use_topocentric: Activar corrección de paralaje topocéntrico para la Luna (recomendado: True).
-        matrix_mode: 'canonical' (11 esferas), 'nodes' (15 esferas), 'polar_not' (22 esferas),
-                     o 'cosmic_26' (26 esferas: Matriz Cósmica Total Consciente + Inconsciente).
     """
-    dt_local = _parse_datetime(birth_datetime)
-    dt_utc = dt_local - timedelta(hours=utc_offset_hours)
-    dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    dt_local, dt_utc = _resolve_natal_and_utc_datetimes(birth_datetime, utc_offset_hours)
     
     raw_profile = hm.CelestialMechanicsEngine.calculate_activation_matrix(
         dt_utc=dt_utc,
@@ -317,12 +383,6 @@ def calculate_thermodynamic_yield(
     
     Calcula el Rendimiento Biológico: Y = (C * R) / (E + epsilon), diagnosticando el régimen
     operativo del sistema biológico y emitiendo una prescripción somática de calibración.
-    
-    Args:
-        entropy: Coeficiente de Entropía/Sombra/Fricción somática E en rango [0.0, 1.0].
-        coherence: Coeficiente de Coherencia/Don/Estructuración C en rango [0.0, 1.0].
-        resonance: Coeficiente de Resonancia/Siddhi/Apertura de campo R en rango [0.0, 1.0].
-        epsilon: Constante de amortiguación para evitar singularidad por división por cero (defecto: 0.05).
     """
     yield_val, regimen, prescripcion = hm.CelestialMechanicsEngine.calculate_biological_yield(
         e=entropy, c=coherence, r=resonance, epsilon=epsilon
@@ -344,23 +404,14 @@ def calculate_thermodynamic_yield(
 def analyze_vortex_bridge(vortex_a: int, vortex_b: int) -> Dict[str, Any]:
     """
     Diagnostica el enlace bio-electromagnético y la dinámica de interferencia entre dos Vórtices Resonantes.
-    
-    Calcula la distancia de Hamming exacta (0 a 6 bits) y clasifica el acoplamiento en:
-      • Antípoda (Inversión Lógica NOT, DH=6): Tensión bipolar máxima y eje de calibración.
-      • Clúster Bioquímico Homólogo: Resonancia por simpatía biológica del anillo de aminoácidos.
-      • En Paralelo (DH <= 2): Coexistencia simultánea de alta frecuencia.
-      • En Serie (DH > 2): Pipeline de flujo de cascada.
-    Indica riesgos de colapso entrópico y protocolos de remediación armónica.
     """
     if vortex_a < 1 or vortex_a > 64 or vortex_b < 1 or vortex_b > 64:
         return {"error": "Ambos vórtices deben estar comprendidos entre 1 y 64."}
         
     bridge = hm.DiscreteParticleEngine.analyze_bridge(vortex_a, vortex_b)
-    
     data_a = hm.CORE64_CATALOG.get(vortex_a, {})
     data_b = hm.CORE64_CATALOG.get(vortex_b, {})
     
-    # Comprobar si forman un canal canónico armónico cerrado
     is_canonical = False
     channel_name = ""
     for k1, k2, c_name in hm.NetworkSynastryEngine.CANONICAL_HARMONIC_CHANNELS:
@@ -408,24 +459,15 @@ def analyze_network_synastry(
 ) -> Dict[str, Any]:
     """
     Calcula la sinastría biofísica y acoplamiento electromagnético entre dos operadores o matrices.
-    
-    Identifica:
-      • Canales electromagnéticos cerrados conjuntamente (pares armónicos complementarios).
-      • Nodos de compañerismo (activaciones en el mismo vórtice por ambos sujetos).
-      • Cruces antípodas (inversión lógica NOT bit a bit, polaridad máxima).
-      • Clústeres bioquímicos compartidos.
-      • Índice de Resonancia Relacional de Red (η_red).
     """
-    dt_a = _parse_datetime(birth_datetime_a) - timedelta(hours=utc_offset_a)
-    dt_b = _parse_datetime(birth_datetime_b) - timedelta(hours=utc_offset_b)
-    dt_a = dt_a.replace(tzinfo=timezone.utc)
-    dt_b = dt_b.replace(tzinfo=timezone.utc)
+    _, dt_a_utc = _resolve_natal_and_utc_datetimes(birth_datetime_a, utc_offset_a)
+    _, dt_b_utc = _resolve_natal_and_utc_datetimes(birth_datetime_b, utc_offset_b)
     
     mat_a = hm.CelestialMechanicsEngine.calculate_activation_matrix(
-        dt_utc=dt_a, lat_deg=lat_a, lon_deg=lon_a, matrix_mode=matrix_mode
+        dt_utc=dt_a_utc, lat_deg=lat_a, lon_deg=lon_a, matrix_mode=matrix_mode
     )
     mat_b = hm.CelestialMechanicsEngine.calculate_activation_matrix(
-        dt_utc=dt_b, lat_deg=lat_b, lon_deg=lon_b, matrix_mode=matrix_mode
+        dt_utc=dt_b_utc, lat_deg=lat_b, lon_deg=lon_b, matrix_mode=matrix_mode
     )
     
     return hm.NetworkSynastryEngine.analyze_coupling(
@@ -443,13 +485,13 @@ def get_planetary_transits(
 ) -> Dict[str, Any]:
     """
     Calcula los tránsitos planetarios en tiempo real proyectados sobre la rueda de 64 vórtices.
-    
-    Permite time-scrubbing temporal sumando o restando horas (offset_hours) respecto al instante actual o especificado.
     """
     if datetime_iso:
         dt_base = _parse_datetime(datetime_iso)
         if dt_base.tzinfo is None:
             dt_base = dt_base.replace(tzinfo=timezone.utc)
+        else:
+            dt_base = dt_base.astimezone(timezone.utc)
     else:
         dt_base = datetime.now(timezone.utc)
         
@@ -459,7 +501,6 @@ def get_planetary_transits(
         dt_utc=dt_calc, lat_deg=latitude, lon_deg=longitude, use_topocentric=use_topocentric
     )
     
-    # Enriquecer cada cuerpo en tránsito con metadatos de vórtice
     enriched_positions = {}
     positions = transits.get("positions", {})
     for body_name, b_info in positions.items():
@@ -494,13 +535,8 @@ def evaluate_transit_interference(
 ) -> Dict[str, Any]:
     """
     Evalúa la interferencia cuántica y activación de canales entre una Carta Natal y los Tránsitos actuales.
-    
-    Detecta canales electromagnéticos completados por los planetas en tránsito y activación de
-    antípodas NOT (disparadores de polaridad y tensión creativa).
     """
-    dt_local = _parse_datetime(birth_datetime)
-    dt_utc = dt_local - timedelta(hours=utc_offset_hours)
-    dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    _, dt_utc = _resolve_natal_and_utc_datetimes(birth_datetime, utc_offset_hours)
     
     natal_matrix = hm.CelestialMechanicsEngine.calculate_activation_matrix(
         dt_utc=dt_utc, lat_deg=latitude, lon_deg=longitude, matrix_mode="cosmic_26"
@@ -510,6 +546,8 @@ def evaluate_transit_interference(
         dt_tr = _parse_datetime(transit_datetime_iso)
         if dt_tr.tzinfo is None:
             dt_tr = dt_tr.replace(tzinfo=timezone.utc)
+        else:
+            dt_tr = dt_tr.astimezone(timezone.utc)
     else:
         dt_tr = datetime.now(timezone.utc)
     dt_tr = dt_tr + timedelta(hours=transit_offset_hours)
@@ -525,20 +563,242 @@ def evaluate_transit_interference(
     )
 
 
+# ── Expansión 1: Escáner Predictivo de Ventanas de Tránsitos ──
+@mcp.tool()
+def scan_transit_windows(
+    birth_datetime: str,
+    utc_offset_hours: float = 0.0,
+    latitude: float = 40.4168,
+    longitude: float = -3.7038,
+    start_datetime_iso: Optional[str] = None,
+    days_ahead: int = 30,
+    step_hours: int = 12
+) -> Dict[str, Any]:
+    """
+    Escanea un horizonte temporal hacia adelante detectando las ventanas exactas donde
+    los tránsitos planetarios cierran canales electromagnéticos armónicos o activan antípodas NOT (DH=6)
+    sobre la matriz natal del operador.
+    
+    Utiliza las claves reales del motor: 'live_activated_channels', 'direct_ignitions' y 'transit_antipodes'.
+    """
+    _, dt_natal_utc = _resolve_natal_and_utc_datetimes(birth_datetime, utc_offset_hours)
+    
+    natal_matrix = hm.CelestialMechanicsEngine.calculate_activation_matrix(
+        dt_utc=dt_natal_utc, lat_deg=latitude, lon_deg=longitude, matrix_mode="cosmic_26"
+    )
+    
+    if start_datetime_iso:
+        dt_start = _parse_datetime(start_datetime_iso)
+        if dt_start.tzinfo is None:
+            dt_start = dt_start.replace(tzinfo=timezone.utc)
+        else:
+            dt_start = dt_start.astimezone(timezone.utc)
+    else:
+        dt_start = datetime.now(timezone.utc)
+
+    days_ahead = max(1, min(180, days_ahead))
+    step_hours = max(1, min(48, step_hours))
+    total_steps = int((days_ahead * 24) // step_hours)
+
+    windows = []
+    for step in range(total_steps + 1):
+        dt_cur = dt_start + timedelta(hours=step * step_hours)
+        transits = hm.RealTimeTransitEngine.calculate_transits(
+            dt_utc=dt_cur, lat_deg=latitude, lon_deg=longitude
+        )
+        interf = hm.RealTimeTransitEngine.evaluate_transit_interference(
+            natal_matrix=natal_matrix,
+            transits_dict=transits.get("positions", {}),
+            dt_utc=dt_cur
+        )
+        ignitions = interf.get("direct_ignitions", [])
+        channels = interf.get("live_activated_channels", [])
+        antipodes = interf.get("transit_antipodes", [])
+
+        if channels or antipodes or ignitions:
+            windows.append({
+                "timestamp_utc": dt_cur.strftime("%Y-%m-%d %H:%M UTC"),
+                "direct_ignitions_count": len(ignitions),
+                "live_channels_count": len(channels),
+                "antipodes_count": len(antipodes),
+                "live_activated_channels": channels,
+                "transit_antipodes": antipodes,
+                "direct_ignitions": [
+                    {"vortex": ig.get("key"), "bodies": ig.get("transit_bodies"), "spheres": ig.get("natal_spheres")}
+                    for ig in ignitions
+                ],
+                "weather_summary": interf.get("weather_summary")
+            })
+
+    return {
+        "scan_range_days": days_ahead,
+        "step_hours": step_hours,
+        "total_active_windows": len(windows),
+        "active_windows": windows[:50]
+    }
+
+
+# ── Expansión 2: Sinastría Multicuerpo / Topología de Grupo (Penta / WA) ──
+@mcp.tool()
+def analyze_group_topology(
+    profile_names: Optional[List[str]] = None,
+    custom_members: Optional[List[Dict[str, Any]]] = None,
+    matrix_mode: str = "canonical"
+) -> Dict[str, Any]:
+    """
+    Analiza la sinastría de equipo / multicuerpo (Penta / Grupo de 3 a 6 operadores):
+      • Cobertura colectiva de los 64 vórtices (porcentaje y puntos ciegos sin cubrir).
+      • Canales electromagnéticos completados por la sinergia colectiva del equipo.
+      • Vórtices redundantes (activados por múltiples miembros).
+      • Anillos de codones / clústeres bioquímicos dominantes en el grupo.
+      
+    Args:
+        profile_names: Lista opcional de nombres de perfiles almacenados en profiles_vault.json.
+        custom_members: Lista opcional de miembros arbitrarios con:
+                        [{"name": str, "birth_datetime": str, "utc_offset": float, "lat": float, "lon": float}]
+        matrix_mode: 'canonical' (11 esferas) o 'cosmic_26' (26 esferas).
+    """
+    members_data = []
+
+    # 1. Cargar perfiles desde bóveda si se especifican nombres o si no hay miembros custom
+    if profile_names or not custom_members:
+        vault = hm.ProfilesVaultManager.load_vault()
+        vault_by_name = {p.get("name", "").strip().lower(): p for p in vault}
+        if profile_names:
+            for p_name in profile_names:
+                p_obj = vault_by_name.get(p_name.strip().lower())
+                if p_obj:
+                    members_data.append(p_obj)
+        else:
+            members_data.extend(vault)
+
+    # 2. Agregar miembros custom si existen
+    if custom_members:
+        for cm in custom_members:
+            members_data.append({
+                "name": cm.get("name", "Operador"),
+                "dt_str": cm.get("birth_datetime", "1990-05-21 14:30:00"),
+                "utc_offset": cm.get("utc_offset", 0.0),
+                "lat": cm.get("lat", 40.4168),
+                "lon": cm.get("lon", -3.7038)
+            })
+
+    if len(members_data) < 2:
+        return {"error": "Se requieren al menos 2 miembros para evaluar la topología de grupo."}
+
+    # 3. Calcular matrices para cada miembro
+    calculated_members = []
+    collective_keys_map: Dict[int, List[str]] = {}
+
+    for mem in members_data:
+        m_name = mem.get("name", "Operador")
+        dt_str = mem.get("dt_str", "")
+        tz = float(mem.get("utc_offset", 0.0))
+        lat = float(mem.get("lat", 40.4168))
+        lon = float(mem.get("lon", -3.7038))
+
+        _, dt_utc = _resolve_natal_and_utc_datetimes(dt_str, tz)
+        mat = hm.CelestialMechanicsEngine.calculate_activation_matrix(
+            dt_utc=dt_utc, lat_deg=lat, lon_deg=lon, matrix_mode=matrix_mode
+        )
+        active_keys = set()
+        for s_name, s_data in mat.get("spheres", {}).items():
+            k = s_data.get("key", 0)
+            if k > 0:
+                active_keys.add(k)
+                collective_keys_map.setdefault(k, []).append(f"{m_name} ({s_name})")
+
+        calculated_members.append({
+            "name": m_name,
+            "active_vortices": sorted(list(active_keys)),
+            "vortices_count": len(active_keys)
+        })
+
+    all_active_keys = set(collective_keys_map.keys())
+    all_64_keys = set(range(1, 65))
+    blind_spots = sorted(list(all_64_keys - all_active_keys))
+
+    # 4. Canales electromagnéticos completados por el equipo
+    group_closed_channels = []
+    for ka, kb, c_name in hm.NetworkSynastryEngine.CANONICAL_HARMONIC_CHANNELS:
+        if ka in all_active_keys and kb in all_active_keys:
+            group_closed_channels.append({
+                "channel": c_name,
+                "vortex_a": ka,
+                "vortex_b": kb,
+                "contributors_a": collective_keys_map[ka],
+                "contributors_b": collective_keys_map[kb]
+            })
+
+    # 5. Vórtices redundantes (activados por 2 o más miembros)
+    shared_vortices = [
+        {"vortex_id": k, "bits": hm.CORE64_CATALOG.get(k, {}).get("bits", ""), "contributors": holders}
+        for k, holders in collective_keys_map.items() if len(holders) > 1
+    ]
+
+    coverage_pct = round((len(all_active_keys) / 64.0) * 100.0, 1)
+
+    return {
+        "total_team_members": len(calculated_members),
+        "members": calculated_members,
+        "collective_coverage": {
+            "active_vortices_count": len(all_active_keys),
+            "coverage_percentage": coverage_pct,
+            "active_vortices": sorted(list(all_active_keys)),
+            "blind_spots_count": len(blind_spots),
+            "blind_spots": blind_spots
+        },
+        "completed_group_channels_count": len(group_closed_channels),
+        "completed_group_channels": group_closed_channels,
+        "shared_vortices_redundancy": shared_vortices
+    }
+
+
+# ── Expansión 3: Puente Biomolecular de Codones de ARN y Aminoácidos IUPAC ──
+@mcp.tool()
+def get_amino_acid_bridge(vortex_id: int) -> Dict[str, Any]:
+    """
+    Mapea de forma determinista un Vórtice Resonante (1 a 64) con la biología molecular estándar:
+      • Nombre y abreviatura IUPAC estándar (3 letras y 1 letra) del aminoácido.
+      • Tripletes de codones de ARN mensajero asociados.
+      • Propiedades fisicoquímicas del residuo.
+      • Clúster genómico / Anillo de aminoácidos en la biosfera.
+      • Vórtices socios que integran el mismo anillo biológico.
+    """
+    if vortex_id < 1 or vortex_id > 64:
+        return {"error": "vortex_id debe estar entre 1 y 64."}
+
+    v_data = hm.CORE64_CATALOG.get(vortex_id, {})
+    ring_code = v_data.get("ring", "")
+    bio = AMINO_ACID_MAP.get(ring_code, {
+        "name_es": "Desconocido", "name_en": "Unknown", "iupac_3": "???", "iupac_1": "?", "codons": [], "chem_class": "No clasificado"
+    })
+
+    # Socios en el mismo anillo de codones
+    partners = [k for k, v in hm.CORE64_CATALOG.items() if v.get("ring") == ring_code and k != vortex_id]
+
+    return {
+        "vortex_id": vortex_id,
+        "bits": v_data.get("bits", "000000"),
+        "cluster_code": ring_code,
+        "cluster_name": hm.resolve_cluster_name(ring_code),
+        "amino_acid": {
+            "name_es": bio["name_es"],
+            "name_en": bio["name_en"],
+            "iupac_3letter": bio["iupac_3"],
+            "iupac_1letter": bio["iupac_1"],
+            "rna_codons": bio["codons"],
+            "chemical_classification": bio["chem_class"]
+        },
+        "codon_ring_partner_vortices": partners
+    }
+
+
 @mcp.tool()
 def get_hypercube_topology(vortex_id: int) -> Dict[str, Any]:
     """
     Calcula la topología de distancias de Hamming completa del Hipercubo Booleano 6D (2^6 = 64)
     partiendo del Vórtice Resonante indicado como centro de coordenadas.
-    
-    Clasifica los 64 vórtices por su distancia de Hamming DH = 0..6:
-      • DH = 0: El vórtice mismo (1 nodo).
-      • DH = 1: Vecinos directos de mutación de 1 bit (6 nodos).
-      • DH = 2: Vecinos a 2 bits (15 nodos).
-      • DH = 3: Zona ecuatorial / ortogonal de máxima tensión (20 nodos).
-      • DH = 4: Complementarios secundarios (15 nodos).
-      • DH = 5: Pre-antípodas a 1 bit de inversión total (6 nodos).
-      • DH = 6: Antípoda lógica NOT bit a bit (1 nodo).
     """
     if vortex_id < 1 or vortex_id > 64:
         return {"error": "vortex_id debe estar entre 1 y 64."}
@@ -590,10 +850,8 @@ def save_vault_profile(
     longitude: float = -3.7038,
     topocentric: bool = True
 ) -> Dict[str, Any]:
-    """
-    Guarda o actualiza un perfil natal en la Bóveda Persistente (profiles_vault.json).
-    """
-    dt_local = _parse_datetime(birth_datetime)
+    """Guarda o actualiza un perfil natal en la Bóveda Persistente (profiles_vault.json)."""
+    dt_local = _parse_datetime(birth_datetime).replace(tzinfo=None)
     profile_data = {
         "name": name.strip(),
         "dt_str": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
@@ -633,17 +891,16 @@ def export_dossier_html(
     entropy: float = 0.20,
     coherence: float = 0.85,
     resonance: float = 0.90,
-    save_path: Optional[str] = None
+    save_path: Optional[str] = None,
+    return_raw_html: bool = False
 ) -> Dict[str, Any]:
     """
     Genera un Dossier Ejecutivo Soberano completo en formato HTML Bio-SciFi autocontenido.
     
-    Incluye los 26 Nodos Cósmicos, vectores de estado termodinámico, síntesis ontológica
-    de Espíritu ⟷ Algoritmo e instrucciones somáticas.
+    Por defecto guarda el archivo en disco (evitando consumir tokens de contexto al agente) y
+    retorna un resumen ejecutivo. Si se requiere el HTML crudo, activar `return_raw_html=True`.
     """
-    dt_local = _parse_datetime(birth_datetime)
-    dt_utc = dt_local - timedelta(hours=utc_offset_hours)
-    dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+    dt_local, dt_utc = _resolve_natal_and_utc_datetimes(birth_datetime, utc_offset_hours)
     
     cosmic_26 = hm.CelestialMechanicsEngine.calculate_activation_matrix(
         dt_utc=dt_utc,
@@ -657,27 +914,31 @@ def export_dossier_html(
         entropy, coherence, resonance
     )
     
-    # Filas de la tabla de 26 nodos
+    safe_name = html.escape(name)
+    
     table_rows = []
     for s_name, s_data in spheres.items():
         k_num = s_data.get("key", 0)
         line = s_data.get("line", 1)
         k_cat = hm.CORE64_CATALOG.get(k_num, {})
         bits = k_cat.get("bits", "000000")
-        is_conscious = "Design" not in s_name and "design" not in s_name and "Inconsciente" not in s_name and "Resplandor" not in s_name and "Propósito" not in s_name and "Atracción" not in s_name and "Abundancia" not in s_name
+        
+        # Fix B: Clasificación determinista usando el campo estructurado 'origen'
+        orig = s_data.get("origen", "")
+        is_conscious = ("Natal" in orig or "Consciente" in orig) and ("Pre-natal" not in orig and "NOT" not in orig)
         tag_col = "#00f0ff" if is_conscious else "#f472b6"
         tag_txt = "CONSCIENTE (NATAL)" if is_conscious else "INCONSCIENTE (DESIGN)"
         
         table_rows.append(f"""
         <tr>
-            <td style="font-weight: bold; color: {tag_col};">{s_name}</td>
+            <td style="font-weight: bold; color: {tag_col};">{html.escape(s_name)}</td>
             <td><span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: {tag_col};">{tag_txt}</span></td>
             <td style="font-family: Consolas; font-weight: bold; color: #fbbf24;">V{k_num}.{line}</td>
             <td style="font-family: Consolas; color: #94a3b8;">{bits}</td>
-            <td style="color: #ef4444;">{k_cat.get('entropia', '')}</td>
-            <td style="color: #00f0ff; font-weight: bold;">{k_cat.get('coherencia', '')}</td>
-            <td style="color: #a78bfa;">{k_cat.get('resonancia', '')}</td>
-            <td style="color: #34d399; font-size: 11px;">{hm.resolve_cluster_name(k_cat.get('ring', ''))}</td>
+            <td style="color: #ef4444;">{html.escape(k_cat.get('entropia', ''))}</td>
+            <td style="color: #00f0ff; font-weight: bold;">{html.escape(k_cat.get('coherencia', ''))}</td>
+            <td style="color: #a78bfa;">{html.escape(k_cat.get('resonancia', ''))}</td>
+            <td style="color: #34d399; font-size: 11px;">{html.escape(hm.resolve_cluster_name(k_cat.get('ring', '')))}</td>
         </tr>
         """)
         
@@ -685,7 +946,7 @@ def export_dossier_html(
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>HEXA-MATRIX CORE-64 • Dossier Ejecutivo Soberano • {name}</title>
+<title>HEXA-MATRIX CORE-64 • Dossier Ejecutivo Soberano • {safe_name}</title>
 <style>
   body {{
     background: #060a14;
@@ -741,7 +1002,7 @@ def export_dossier_html(
       <div class="subtitle">Arquitectura Cuántica Bio-Informacional y Topología de 26 Nodos Cósmicos</div>
     </div>
     <div style="text-align: right; font-family: Consolas; color: #38bdf8; font-size: 12px;">
-      OPERADOR: {name.upper()}<br>
+      OPERADOR: {safe_name.upper()}<br>
       VERSIÓN DIRECTIVA v3.0 SOBERANA
     </div>
   </div>
@@ -785,8 +1046,8 @@ def export_dossier_html(
         <span style="font-size: 20px; font-weight: bold; color: #10b981; font-family: Consolas;">{bio_yield:.2f}</span>
       </div>
     </div>
-    <p><b>Régimen Operativo:</b> <span style="color: #00f0ff;">{regimen}</span></p>
-    <p><b>Prescripción Somática:</b> <em>{prescripcion}</em></p>
+    <p><b>Régimen Operativo:</b> <span style="color: #00f0ff;">{html.escape(regimen)}</span></p>
+    <p><b>Prescripción Somática:</b> <em>{html.escape(prescripcion)}</em></p>
   </div>
 
   <div class="card">
@@ -817,20 +1078,147 @@ def export_dossier_html(
 </body>
 </html>"""
 
-    if save_path:
-        target_path = os.path.abspath(save_path)
-        with open(target_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        return {
-            "status": "success",
-            "file_saved": target_path,
-            "bytes": len(html_content.encode("utf-8"))
-        }
-        
+    # Determinar ruta de guardado segura
+    if not save_path:
+        clean_filename = "".join(c for c in name if c.isalnum() or c in ("-", "_")).strip() or "operador"
+        save_path = os.path.join(SCRIPT_DIR, f"dossier_{clean_filename}.html")
+    
+    target_path = os.path.abspath(save_path)
+    with open(target_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    resp = {
+        "status": "success",
+        "file_saved": target_path,
+        "file_size_bytes": os.path.getsize(target_path),
+        "subject": name,
+        "total_spheres": len(spheres),
+        "biological_yield_Y": bio_yield,
+        "operating_regime": regimen
+    }
+    if return_raw_html:
+        resp["html_content"] = html_content
+    return resp
+
+
+@mcp.tool()
+def export_dossier_pdf(
+    name: str,
+    birth_datetime: str,
+    utc_offset_hours: float = 0.0,
+    latitude: float = 40.4168,
+    longitude: float = -3.7038,
+    entropy: float = 0.20,
+    coherence: float = 0.85,
+    resonance: float = 0.90,
+    save_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Genera un Dossier Ejecutivo Soberano completo en formato PDF nativo utilizando ReportLab.
+    
+    Incluye tabla formateada de los 26 Nodos Cósmicos, vectores de estado termodinámico
+    y síntesis ontológica.
+    """
+    if not REPORTLAB_AVAILABLE:
+        return {"error": "ReportLab no está disponible en este entorno. Instalar con: pip install reportlab"}
+
+    dt_local, dt_utc = _resolve_natal_and_utc_datetimes(birth_datetime, utc_offset_hours)
+    
+    cosmic_26 = hm.CelestialMechanicsEngine.calculate_activation_matrix(
+        dt_utc=dt_utc,
+        lat_deg=latitude,
+        lon_deg=longitude,
+        use_topocentric=True,
+        matrix_mode="cosmic_26"
+    )
+    spheres = cosmic_26.get("spheres", {})
+    bio_yield, regimen, prescripcion = hm.CelestialMechanicsEngine.calculate_biological_yield(
+        entropy, coherence, resonance
+    )
+
+    if not save_path:
+        clean_filename = "".join(c for c in name if c.isalnum() or c in ("-", "_")).strip() or "operador"
+        save_path = os.path.join(SCRIPT_DIR, f"dossier_{clean_filename}.pdf")
+    target_path = os.path.abspath(save_path)
+
+    doc = SimpleDocTemplate(
+        target_path,
+        pagesize=A4,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm
+    )
+    styles = getSampleStyleSheet()
+    
+    st_title = ParagraphStyle("BioTitle", parent=styles["Heading1"], fontName="Helvetica-Bold", fontSize=15, textColor=rl_colors.HexColor("#00f0ff"), spaceAfter=3)
+    st_sub = ParagraphStyle("BioSub", parent=styles["Normal"], fontName="Helvetica", fontSize=8.5, textColor=rl_colors.HexColor("#94a3b8"), spaceAfter=8)
+    st_h2 = ParagraphStyle("BioH2", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=10.5, textColor=rl_colors.HexColor("#fbbf24"), spaceBefore=6, spaceAfter=4)
+    st_body = ParagraphStyle("BioBody", parent=styles["Normal"], fontName="Helvetica", fontSize=8, leading=10.5, textColor=rl_colors.HexColor("#e2e8f0"))
+    st_th = ParagraphStyle("BioTH", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=7.5, leading=9, textColor=rl_colors.HexColor("#93c5fd"))
+    st_td = ParagraphStyle("BioTD", parent=styles["Normal"], fontName="Helvetica", fontSize=7, leading=8.5, textColor=rl_colors.HexColor("#e2e8f0"))
+
+    elements = [
+        Paragraph(f"⚡ HEXA-MATRIX CORE-64 • DOSSIER EJECUTIVO • {html.escape(name).upper()}", st_title),
+        Paragraph("Arquitectura Cuántica Bio-Informacional y Topología de 26 Nodos Cósmicos", st_sub),
+        Spacer(1, 4),
+        Paragraph(f"<b>Instante Natal:</b> {dt_local.strftime('%Y-%m-%d %H:%M:%S')} (UTC{'+' if utc_offset_hours>=0 else ''}{utc_offset_hours:g}) | <b>Prenatal 88°:</b> {cosmic_26.get('utc_prenatal')} | <b>Lat:</b> {latitude:.4f}° <b>Lon:</b> {longitude:.4f}°", st_body),
+        Spacer(1, 6),
+        Paragraph(f"<b>Vector de Estado:</b> E={entropy:.2f} | C={coherence:.2f} | R={resonance:.2f} | <b>Rendimiento Biológico (Y):</b> {bio_yield:.2f}", st_h2),
+        Paragraph(f"<b>Régimen Operativo:</b> {html.escape(regimen)}", st_body),
+        Paragraph(f"<b>Prescripción Somática:</b> {html.escape(prescripcion)}", st_body),
+        Spacer(1, 8),
+        Paragraph("🌌 MATRIZ CÓSMICA TOTAL (26 NODOS ACTIVOS)", st_h2)
+    ]
+
+    table_data = [
+        [
+            Paragraph("<b>Esfera</b>", st_th),
+            Paragraph("<b>Plano</b>", st_th),
+            Paragraph("<b>Vórtice</b>", st_th),
+            Paragraph("<b>Bits</b>", st_th),
+            Paragraph("<b>Coherencia (Don)</b>", st_th),
+            Paragraph("<b>Resonancia (Siddhi)</b>", st_th),
+            Paragraph("<b>Clúster</b>", st_th)
+        ]
+    ]
+
+    for s_name, s_data in spheres.items():
+        k_num = s_data.get("key", 0)
+        line = s_data.get("line", 1)
+        k_cat = hm.CORE64_CATALOG.get(k_num, {})
+        orig = s_data.get("origen", "")
+        is_conscious = ("Natal" in orig or "Consciente" in orig) and ("Pre-natal" not in orig and "NOT" not in orig)
+        plane_str = "Natal" if is_conscious else "Design"
+
+        table_data.append([
+            Paragraph(html.escape(s_name), st_td),
+            Paragraph(plane_str, st_td),
+            Paragraph(f"V{k_num}.{line}", st_td),
+            Paragraph(k_cat.get("bits", ""), st_td),
+            Paragraph(html.escape(k_cat.get("coherencia", "")), st_td),
+            Paragraph(html.escape(k_cat.get("resonancia", "")), st_td),
+            Paragraph(html.escape(hm.resolve_cluster_name(k_cat.get("ring", ""))), st_td)
+        ])
+
+    table = Table(table_data, colWidths=[42 * mm, 16 * mm, 16 * mm, 16 * mm, 32 * mm, 32 * mm, 32 * mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#0f1c38")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#334155"))
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
+
     return {
         "status": "success",
-        "html_content": html_content,
-        "bytes": len(html_content.encode("utf-8"))
+        "pdf_saved": target_path,
+        "file_size_bytes": os.path.getsize(target_path),
+        "subject": name,
+        "total_spheres": len(spheres),
+        "biological_yield_Y": bio_yield
     }
 
 
@@ -891,7 +1279,7 @@ A partir de los datos calculados:
 1. Analiza el Eje Cuántico Primario: Trabajo de Vida (Sol Natal) y Evolución (Tierra Natal).
 2. Analiza el Diseño Inconsciente (88° solar arc): Resplandor y Propósito.
 3. Evalúa la Esfera de la Atracción y su paralaje lunar topocéntrico.
-4. Identifica los clústeres de codones (anillos de aminoácidos) predominantes.
+4. Identifica los clústeres de codones (anillos de aminoácidos) predominantes con `get_amino_acid_bridge`.
 5. Emite un protocolo de calibración somática basado en las frecuencias de Don (Coherencia) y Siddhi (Resonancia)."""
 
 

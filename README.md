@@ -103,7 +103,7 @@ $$\text{Rendimiento} = \frac{C \cdot R}{E + \epsilon} \quad (\epsilon = 0.05)$$
 
 **HEXA-MATRIX CORE-64** incorpora un servidor nativo de **Model Context Protocol (MCP)** en [`hexamatrix_mcp_server.py`](hexamatrix_mcp_server.py). Permite a asistentes y agentes de IA (Google Antigravity, Claude Desktop, Cursor, etc.) invocar todas las capacidades del motor de forma determinista y estandarizada sin depender de la interfaz gráfica.
 
-### 🛠️ Herramientas Expuestas (13 Tools):
+### 🛠️ Herramientas Expuestas (17 Tools):
 - `calculate_hologenetic_profile`: Cálculo de la Matriz Natal y Prenatal (88° solar arc via Newton-Raphson, paralaje lunar topocéntrico y modo de hasta 26 nodos).
 - `calculate_thermodynamic_yield`: Evaluación de la ecuación de estado $Y = \frac{C \cdot R}{E + \epsilon}$ con prescripción somática.
 - `get_vortex_info`: Morfología de 6 bits, trigramas somático/ambiental, antípoda NOT (DH=6), clúster de aminoácidos y 6 vecinos a DH=1.
@@ -112,9 +112,14 @@ $$\text{Rendimiento} = \frac{C \cdot R}{E + \epsilon} \quad (\epsilon = 0.05)$$
 - `analyze_network_synastry`: Acoplamiento bio-electromagnético entre dos sujetos, canales cerrados y resonancia $\eta_{\text{red}}$.
 - `get_planetary_transits`: Posiciones planetarias en tiempo real con time-scrubbing horario ($\pm \Delta t$).
 - `evaluate_transit_interference`: Canales activados y disparadores antípodas entre tránsitos y carta natal.
+- `scan_transit_windows`: Escáner temporal hacia adelante (ej. 30/90 días) detectando ventanas de activación de canales e igniciones.
+- `analyze_group_topology`: Sinastría de grupo / multicuerpo (Penta / WA) para 3 a 6 operadores con cobertura colectiva y puntos ciegos.
+- `get_amino_acid_bridge`: Mapeo determinista de vórtice a aminoácido IUPAC, tripletes de ARN y anillo de codones de la biosfera.
 - `get_hypercube_topology`: Topología booleana 6D completa ($2^6 = 64$) con distribución por distancia de Hamming (DH=0 a 6).
 - `list_vault_profiles` / `save_vault_profile` / `delete_vault_profile`: Gestión de la bóveda local (`profiles_vault.json`).
 - `export_dossier_html`: Generación de dossier ejecutivo en HTML Bio-SciFi con la síntesis de *Espíritu, Algoritmo y Coherencia*.
+- `export_dossier_pdf`: Exportación nativa a PDF con ReportLab de la Matriz Cósmica Total y vector termodinámico.
+
 
 ### 📚 Recursos (Resources) y Plantillas (Prompts):
 - `hexamatrix://vortices/catalog`: Catálogo completo de los 64 vórtices en JSON.
